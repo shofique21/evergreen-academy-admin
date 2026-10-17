@@ -266,6 +266,105 @@ async function handleEnrollApplication() {
   }
 }
 
+// Edit Application Dialog
+const editDialogVisible = ref(false)
+const editingApp = ref<AdmissionApplication | null>(null)
+const editSubmitting = ref(false)
+const editSameAsPresentAddress = ref(false)
+const editForm = ref({
+  class_id: '' as any,
+  first_name: '',
+  last_name: '',
+  date_of_birth: '',
+  gender: 'MALE',
+  blood_group: 'A+',
+  religion: 'Islam',
+  emergency_phone: '',
+  present_address: '',
+  permanent_address: '',
+  previous_school: '',
+  guardian_name: '',
+  guardian_phone: '',
+  guardian_email: '',
+  guardian_relationship: 'FATHER',
+  guardian_occupation: '',
+  status: 'PENDING',
+  review_notes: '',
+})
+
+function openEditModal(app: AdmissionApplication) {
+  editingApp.value = app
+  editForm.value = {
+    class_id: app.class_id,
+    first_name: app.first_name || '',
+    last_name: app.last_name || '',
+    date_of_birth: app.date_of_birth ? app.date_of_birth.substring(0, 10) : '',
+    gender: app.gender || 'MALE',
+    blood_group: app.blood_group || 'A+',
+    religion: app.religion || 'Islam',
+    emergency_phone: app.emergency_phone || '',
+    present_address: app.present_address || '',
+    permanent_address: app.permanent_address || '',
+    previous_school: app.previous_school || '',
+    guardian_name: app.guardian_name || '',
+    guardian_phone: app.guardian_phone || '',
+    guardian_email: app.guardian_email || '',
+    guardian_relationship: app.guardian_relationship || 'FATHER',
+    guardian_occupation: app.guardian_occupation || '',
+    status: app.status || 'PENDING',
+    review_notes: app.review_notes || '',
+  }
+  editSameAsPresentAddress.value = Boolean(
+    app.present_address && app.permanent_address && app.present_address === app.permanent_address
+  )
+  editDialogVisible.value = true
+}
+
+function onEditSameAddressChange() {
+  if (editSameAsPresentAddress.value) {
+    editForm.value.permanent_address = editForm.value.present_address
+  }
+}
+
+function onEditPresentAddressInput() {
+  if (editSameAsPresentAddress.value) {
+    editForm.value.permanent_address = editForm.value.present_address
+  }
+}
+
+async function handleUpdateApplication() {
+  if (!editingApp.value) return
+  if (
+    !editForm.value.class_id ||
+    !editForm.value.first_name?.trim() ||
+    !editForm.value.last_name?.trim() ||
+    !editForm.value.date_of_birth ||
+    !editForm.value.emergency_phone?.trim() ||
+    !editForm.value.guardian_name?.trim() ||
+    !editForm.value.guardian_phone?.trim() ||
+    !editForm.value.present_address?.trim()
+  ) {
+    notifyWarn('Validation Required', 'Please complete all required fields (marked with *).')
+    return
+  }
+
+  try {
+    editSubmitting.value = true
+    const { data } = await api.put(`/api/v1/admissions/applications/${editingApp.value.id}`, editForm.value)
+    notifySuccess('Application Updated', data.message || 'Application record saved successfully.')
+    editDialogVisible.value = false
+    await fetchApplications()
+    if (detailsDialogVisible.value && selectedDetailApp.value?.id === editingApp.value.id) {
+      selectedDetailApp.value = { ...selectedDetailApp.value, ...data.data }
+    }
+  } catch (err: unknown) {
+    const errObj = err as { message?: string }
+    notifyError('Update Failed', errObj.message || 'Could not update admission application.')
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
 onMounted(async () => {
   await fetchMetadata()
   await fetchApplications()
@@ -370,9 +469,9 @@ onMounted(async () => {
           </template>
         </Column>
 
-        <Column header="Actions" style="width: 250px">
+        <Column header="Actions" style="width: 320px">
           <template #body="{ data }">
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
               <Button
                 icon="pi pi-eye"
                 label="Details"
@@ -381,6 +480,15 @@ onMounted(async () => {
                 severity="secondary"
                 class="hover:text-emerald-700 hover:border-emerald-600 transition-colors"
                 @click="openDetailsModal(data)"
+              />
+              <Button
+                icon="pi pi-pencil"
+                label="Edit"
+                size="small"
+                outlined
+                severity="warn"
+                class="hover:text-amber-700 hover:border-amber-600 transition-colors"
+                @click="openEditModal(data)"
               />
               <Button
                 v-if="data.status !== 'ENROLLED'"
@@ -794,6 +902,384 @@ onMounted(async () => {
       </form>
     </Dialog>
 
+    <!-- Edit Application Modal Dialog -->
+    <Dialog
+      v-model:visible="editDialogVisible"
+      modal
+      :style="{ width: '840px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-amber-100 text-amber-800">
+            <i class="pi pi-pencil"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Admission Application</h2>
+              <span class="badge-intake">Ref: {{ editingApp?.application_no }}</span>
+            </div>
+            <p class="modal-subtitle">Update applicant personal particulars, target grade, guardian contacts, or review status</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateApplication" class="intake-form-body">
+        <!-- Section 1: Academic Grade & Status -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">1</span>
+            <div>
+              <h3 class="section-heading">Academic Grade & Application Status</h3>
+              <p class="section-desc">Designate target grade level and current pipeline review stage</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="edit_app_class" label="Class Level Applied For" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-bookmark field-icon"></i>
+                <select id="edit_app_class" v-model="editForm.class_id" class="clean-select" required>
+                  <option value="" disabled>Select target class / grade...</option>
+                  <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_status" label="Application Pipeline Status" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-flag field-icon text-amber-600"></i>
+                <select id="edit_app_status" v-model="editForm.status" class="clean-select" required>
+                  <option value="PENDING">Pending Review</option>
+                  <option value="UNDER_REVIEW">Under Review / Verification</option>
+                  <option value="APPROVED">Approved for Admission</option>
+                  <option value="REJECTED">Rejected</option>
+                  <option value="ENROLLED">Enrolled in SIS</option>
+                </select>
+              </div>
+            </FormField>
+          </div>
+
+          <div class="mt-3">
+            <FormField id="edit_app_notes" label="Review / Assessment Notes">
+              <div class="clean-field-wrap">
+                <i class="pi pi-comment field-icon"></i>
+                <input
+                  id="edit_app_notes"
+                  v-model="editForm.review_notes"
+                  type="text"
+                  placeholder="Verification remarks, entrance exam score, interview observations..."
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+          </div>
+        </div>
+
+        <!-- Section 2: Student Demographic & Identity -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">2</span>
+            <div>
+              <h3 class="section-heading">Student Personal Particulars</h3>
+              <p class="section-desc">Legal name, date of birth, gender, and biological details</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="edit_app_fname" label="First Name" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-user field-icon"></i>
+                <input
+                  id="edit_app_fname"
+                  v-model="editForm.first_name"
+                  type="text"
+                  placeholder="e.g. Wasif"
+                  required
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_lname" label="Last Name" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-user field-icon"></i>
+                <input
+                  id="edit_app_lname"
+                  v-model="editForm.last_name"
+                  type="text"
+                  placeholder="e.g. Ahmed"
+                  required
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_dob" label="Date of Birth" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-calendar field-icon"></i>
+                <input
+                  id="edit_app_dob"
+                  v-model="editForm.date_of_birth"
+                  type="date"
+                  required
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_gender" label="Gender" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-users field-icon"></i>
+                <div class="segmented-control">
+                  <button
+                    type="button"
+                    class="segment-btn"
+                    :class="{ active: editForm.gender === 'MALE' }"
+                    @click="editForm.gender = 'MALE'"
+                  >
+                    Male
+                  </button>
+                  <button
+                    type="button"
+                    class="segment-btn"
+                    :class="{ active: editForm.gender === 'FEMALE' }"
+                    @click="editForm.gender = 'FEMALE'"
+                  >
+                    Female
+                  </button>
+                  <button
+                    type="button"
+                    class="segment-btn"
+                    :class="{ active: editForm.gender === 'OTHER' }"
+                    @click="editForm.gender = 'OTHER'"
+                  >
+                    Other
+                  </button>
+                </div>
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_blood" label="Blood Group">
+              <div class="clean-field-wrap">
+                <i class="pi pi-heart field-icon text-rose-500"></i>
+                <select id="edit_app_blood" v-model="editForm.blood_group" class="clean-select">
+                  <option value="A+">A Positive (A+)</option>
+                  <option value="A-">A Negative (A-)</option>
+                  <option value="B+">B Positive (B+)</option>
+                  <option value="B-">B Negative (B-)</option>
+                  <option value="O+">O Positive (O+)</option>
+                  <option value="O-">O Negative (O-)</option>
+                  <option value="AB+">AB Positive (AB+)</option>
+                  <option value="AB-">AB Negative (AB-)</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_religion" label="Religion">
+              <div class="clean-field-wrap">
+                <i class="pi pi-globe field-icon text-amber-500"></i>
+                <select id="edit_app_religion" v-model="editForm.religion" class="clean-select">
+                  <option value="Islam">Islam</option>
+                  <option value="Hinduism">Hinduism</option>
+                  <option value="Buddhism">Buddhism</option>
+                  <option value="Christianity">Christianity</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_phone" label="Emergency Contact Phone" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-phone field-icon"></i>
+                <input
+                  id="edit_app_phone"
+                  v-model="editForm.emergency_phone"
+                  type="tel"
+                  placeholder="+8801700000000"
+                  required
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_prev_school" label="Previous School Attended">
+              <div class="clean-field-wrap">
+                <i class="pi pi-building field-icon text-slate-400"></i>
+                <input
+                  id="edit_app_prev_school"
+                  v-model="editForm.previous_school"
+                  type="text"
+                  placeholder="e.g. Sunnydale School, Dhaka"
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+          </div>
+        </div>
+
+        <!-- Section 3: Primary Guardian & Family Details -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">3</span>
+            <div>
+              <h3 class="section-heading">Primary Guardian & Family Details</h3>
+              <p class="section-desc">Parent or legal guardian responsible for the student</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="edit_app_gname" label="Guardian Full Name" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-user field-icon"></i>
+                <input
+                  id="edit_app_gname"
+                  v-model="editForm.guardian_name"
+                  type="text"
+                  placeholder="e.g. Mohammad Rafiqul Islam"
+                  required
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_grel" label="Relationship to Student" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-users field-icon"></i>
+                <select id="edit_app_grel" v-model="editForm.guardian_relationship" class="clean-select" required>
+                  <option value="FATHER">Father</option>
+                  <option value="MOTHER">Mother</option>
+                  <option value="LEGAL_GUARDIAN">Legal Guardian</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_gphone" label="Guardian Mobile Phone" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-phone field-icon"></i>
+                <input
+                  id="edit_app_gphone"
+                  v-model="editForm.guardian_phone"
+                  type="tel"
+                  placeholder="+8801711000000"
+                  required
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_app_gemail" label="Guardian Email Address">
+              <div class="clean-field-wrap">
+                <i class="pi pi-envelope field-icon"></i>
+                <input
+                  id="edit_app_gemail"
+                  v-model="editForm.guardian_email"
+                  type="email"
+                  placeholder="guardian@example.com"
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+
+            <div class="col-span-full">
+              <FormField id="edit_app_gocc" label="Guardian Occupation / Profession">
+                <div class="clean-field-wrap">
+                  <i class="pi pi-briefcase field-icon"></i>
+                  <input
+                    id="edit_app_gocc"
+                    v-model="editForm.guardian_occupation"
+                    type="text"
+                    placeholder="e.g. Civil Engineer, Banker, Doctor, Teacher"
+                    class="clean-input"
+                  />
+                </div>
+              </FormField>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Residential & Geographic Addresses -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">4</span>
+            <div>
+              <h3 class="section-heading">Residential & Geographic Addresses</h3>
+              <p class="section-desc">Current living quarters and official home permanent address</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-1">
+            <FormField id="edit_app_present" label="Present Residential Address" required>
+              <div class="clean-field-wrap address-wrap">
+                <i class="pi pi-map-marker field-icon-top"></i>
+                <textarea
+                  id="edit_app_present"
+                  v-model="editForm.present_address"
+                  rows="2"
+                  placeholder="House #, Road #, Sector/Area, City, Postal Code"
+                  required
+                  class="clean-textarea"
+                  @input="onEditPresentAddressInput"
+                ></textarea>
+              </div>
+            </FormField>
+
+            <!-- Same as present toggle -->
+            <div class="same-address-toggle">
+              <label class="toggle-container">
+                <input
+                  type="checkbox"
+                  v-model="editSameAsPresentAddress"
+                  class="toggle-checkbox"
+                  @change="onEditSameAddressChange"
+                />
+                <span class="toggle-label font-medium text-slate-700">Permanent Address is the same as Present Address</span>
+              </label>
+            </div>
+
+            <FormField id="edit_app_perm" label="Permanent Address">
+              <div class="clean-field-wrap address-wrap">
+                <i class="pi pi-home field-icon-top"></i>
+                <textarea
+                  id="edit_app_perm"
+                  v-model="editForm.permanent_address"
+                  rows="2"
+                  placeholder="Village / Thana / District / Permanent domicile"
+                  class="clean-textarea"
+                  :disabled="editSameAsPresentAddress"
+                ></textarea>
+              </div>
+            </FormField>
+          </div>
+        </div>
+
+        <!-- Clean Modal Action Footer -->
+        <div class="intake-form-footer">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500 font-mono">
+              Ref: {{ editingApp?.application_no }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button
+              type="button"
+              label="Cancel"
+              severity="secondary"
+              outlined
+              @click="editDialogVisible = false"
+            />
+            <Button
+              type="submit"
+              label="Save Application Changes"
+              icon="pi pi-check"
+              :loading="editSubmitting"
+              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
+        </div>
+      </form>
+    </Dialog>
+
     <!-- Review Application Modal Dialog -->
     <Dialog v-model:visible="reviewDialogVisible" modal header="Admission Application Review" :style="{ width: '500px' }">
       <div v-if="selectedApp" class="flex flex-col gap-3.5 pt-2">
@@ -1131,6 +1617,13 @@ onMounted(async () => {
               severity="secondary"
               outlined
               @click="detailsDialogVisible = false"
+            />
+            <Button
+              label="Edit Application"
+              icon="pi pi-pencil"
+              severity="warn"
+              outlined
+              @click="openEditModal(selectedDetailApp)"
             />
             <Button
               v-if="selectedDetailApp.status !== 'ENROLLED'"
