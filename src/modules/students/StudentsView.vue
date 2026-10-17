@@ -148,13 +148,18 @@ const transferForm = ref({
   reason: '',
 })
 const transferSectionsList = ref<{ id: number; name: string }[]>([])
-const transferReasonSuggestions = [
-  'Parent Request',
-  'Academic Section Rebalancing',
-  'Track / Medium Adjustment',
-  'Family Relocation',
-  'Transfer to Another School',
+const transferSuggestionsList = [
+  { label: 'Parent Request', icon: 'pi pi-user', color: 'text-emerald-600' },
+  { label: 'Section Rebalancing', icon: 'pi pi-sync', color: 'text-blue-600' },
+  { label: 'Track / Medium Adjustment', icon: 'pi pi-book', color: 'text-indigo-600' },
+  { label: 'Family Relocation', icon: 'pi pi-home', color: 'text-amber-600' },
+  { label: 'School Transfer', icon: 'pi pi-building', color: 'text-purple-600' },
+  { label: 'Commute / Distance', icon: 'pi pi-map-marker', color: 'text-teal-600' },
 ]
+
+function selectTransferSuggestion(label: string) {
+  transferForm.value.reason = label
+}
 
 // Withdraw Dialog
 const withdrawDialogVisible = ref(false)
@@ -165,14 +170,18 @@ const withdrawForm = ref({
   exit_date: new Date().toISOString().substring(0, 10),
   reason: '',
 })
-const withdrawReasonSuggestions = [
-  'Family Relocation',
-  'Admitted to Another Institution',
-  'Emigration / Relocating Abroad',
-  'Medical / Health Reasons',
-  'Financial Circumstances',
-  'Personal / Family Decision',
+const withdrawSuggestionsList = [
+  { label: 'Family Relocation', icon: 'pi pi-home', color: 'text-rose-500' },
+  { label: 'School Transfer', icon: 'pi pi-building', color: 'text-blue-500' },
+  { label: 'Emigration / Abroad', icon: 'pi pi-globe', color: 'text-indigo-500' },
+  { label: 'Medical / Health', icon: 'pi pi-heart', color: 'text-red-500' },
+  { label: 'Financial Hardship', icon: 'pi pi-wallet', color: 'text-amber-500' },
+  { label: 'Personal / Family Decision', icon: 'pi pi-users', color: 'text-purple-500' },
 ]
+
+function selectWithdrawSuggestion(label: string) {
+  withdrawForm.value.reason = label
+}
 
 // Batch Promotion Dialog
 const promoteDialogVisible = ref(false)
@@ -1353,44 +1362,66 @@ onMounted(async () => {
           </ul>
         </div>
 
-        <!-- Reason / Administrative Remarks -->
-        <div class="space-y-2">
-          <FormField id="transfer_reason" label="Reason for Transfer / Administrative Remarks" required>
-            <InputText
-              id="transfer_reason"
-              v-model="transferForm.reason"
-              placeholder="e.g. Parent requested shift to section Meghna / Family relocation"
-              class="w-full"
-              required
-            />
-          </FormField>
-
-          <!-- Quick Suggestions Chips -->
-          <div class="space-y-1.5 pt-1">
+        <!-- Reason / Administrative Remarks with Suggestion Buttons -->
+        <div class="space-y-3">
+          <!-- Preset Transfer Reason Buttons Grid -->
+          <div class="bg-slate-50/90 rounded-xl p-3.5 border border-slate-200/90 space-y-2.5">
             <div class="flex items-center justify-between">
-              <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                <i class="pi pi-sparkles text-emerald-600 text-xs"></i>
-                Quick Reason Suggestions
+              <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <i class="pi pi-bolt text-emerald-600"></i>
+                Preset Reason Suggestions
               </span>
-              <span v-if="transferForm.reason" class="text-[11px] text-slate-400">Click to switch reason</span>
+              <span class="text-[11px] text-slate-500 font-medium">Click a button to auto-fill</span>
             </div>
-            <div class="flex flex-wrap gap-1.5">
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <button
-                v-for="sug in transferReasonSuggestions"
-                :key="sug"
+                v-for="sug in transferSuggestionsList"
+                :key="sug.label"
                 type="button"
-                class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer border shadow-2xs"
-                :class="transferForm.reason === sug
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold ring-2 ring-emerald-400/20 shadow-xs'
-                  : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200/90 hover:border-slate-300 hover:text-slate-900'"
-                @click="transferForm.reason = sug"
+                class="suggestion-btn flex items-center justify-between p-2.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer border text-left"
+                :class="transferForm.reason === sug.label
+                  ? 'bg-emerald-50 border-emerald-500 text-emerald-950 font-bold ring-2 ring-emerald-500/25 shadow-xs'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 hover:border-slate-400 shadow-xs'"
+                @click="selectTransferSuggestion(sug.label)"
               >
-                <i v-if="transferForm.reason === sug" class="pi pi-check text-[10px] text-emerald-600 font-bold"></i>
-                <i v-else class="pi pi-tag text-[10px] text-slate-400"></i>
-                <span>{{ sug }}</span>
+                <div class="flex items-center gap-2 min-w-0">
+                  <i :class="[sug.icon, transferForm.reason === sug.label ? 'text-emerald-600' : sug.color, 'text-sm shrink-0']"></i>
+                  <span class="truncate">{{ sug.label }}</span>
+                </div>
+                <i v-if="transferForm.reason === sug.label" class="pi pi-check text-emerald-600 text-xs shrink-0 font-bold"></i>
               </button>
             </div>
           </div>
+
+          <!-- Reason Input -->
+          <FormField id="transfer_reason" label="Reason for Transfer / Administrative Remarks" required>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <i class="pi pi-comment text-xs"></i>
+              </span>
+              <InputText
+                id="transfer_reason"
+                v-model="transferForm.reason"
+                placeholder="Select a suggestion above or enter specific reason..."
+                class="w-full font-medium pl-8"
+                required
+              />
+            </div>
+            <div class="flex items-center justify-between mt-1">
+              <span class="text-[11px] text-slate-400">
+                Selected preset can be edited or customized with additional details.
+              </span>
+              <button
+                v-if="transferForm.reason"
+                type="button"
+                class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium hover:underline"
+                @click="transferForm.reason = ''"
+              >
+                Clear field
+              </button>
+            </div>
+          </FormField>
         </div>
 
         <!-- Footer Actions -->
@@ -1508,43 +1539,66 @@ onMounted(async () => {
             <span class="text-[11px] text-slate-400 mt-1 block">Official date recorded on transfer clearance certificates.</span>
           </FormField>
 
-          <div class="space-y-2">
-            <FormField id="withdraw_reason" label="Reason for Departure / Withdrawal" required>
-              <InputText
-                id="withdraw_reason"
-                v-model="withdrawForm.reason"
-                placeholder="e.g. Family relocation, transferred abroad, personal family decision"
-                class="w-full"
-                required
-              />
-            </FormField>
-
-            <!-- Quick Departure Reason Chips -->
-            <div class="space-y-1.5 pt-1">
+          <!-- Reason Selection & Input -->
+          <div class="space-y-3">
+            <!-- Preset Reason Suggestion Buttons Grid -->
+            <div class="bg-slate-50/90 rounded-xl p-3.5 border border-slate-200/90 space-y-2.5">
               <div class="flex items-center justify-between">
-                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <i class="pi pi-sparkles text-rose-500 text-xs"></i>
-                  Quick Departure Reasons
+                <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="pi pi-bolt text-rose-600"></i>
+                  Preset Reason Suggestions
                 </span>
-                <span v-if="withdrawForm.reason" class="text-[11px] text-slate-400">Click to switch reason</span>
+                <span class="text-[11px] text-slate-500 font-medium">Click a button to auto-fill</span>
               </div>
-              <div class="flex flex-wrap gap-1.5">
+
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <button
-                  v-for="sug in withdrawReasonSuggestions"
-                  :key="sug"
+                  v-for="sug in withdrawSuggestionsList"
+                  :key="sug.label"
                   type="button"
-                  class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer border shadow-2xs"
-                  :class="withdrawForm.reason === sug
-                    ? 'bg-rose-50 border-rose-300 text-rose-700 font-semibold ring-2 ring-rose-400/20 shadow-xs'
-                    : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200/90 hover:border-slate-300 hover:text-slate-900'"
-                  @click="withdrawForm.reason = sug"
+                  class="suggestion-btn flex items-center justify-between p-2.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer border text-left"
+                  :class="withdrawForm.reason === sug.label
+                    ? 'bg-rose-50 border-rose-500 text-rose-950 font-bold ring-2 ring-rose-500/25 shadow-xs'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 hover:border-slate-400 shadow-xs'"
+                  @click="selectWithdrawSuggestion(sug.label)"
                 >
-                  <i v-if="withdrawForm.reason === sug" class="pi pi-check text-[10px] text-rose-600 font-bold"></i>
-                  <i v-else class="pi pi-tag text-[10px] text-slate-400"></i>
-                  <span>{{ sug }}</span>
+                  <div class="flex items-center gap-2 min-w-0">
+                    <i :class="[sug.icon, withdrawForm.reason === sug.label ? 'text-rose-600' : sug.color, 'text-sm shrink-0']"></i>
+                    <span class="truncate">{{ sug.label }}</span>
+                  </div>
+                  <i v-if="withdrawForm.reason === sug.label" class="pi pi-check text-rose-600 text-xs shrink-0 font-bold"></i>
                 </button>
               </div>
             </div>
+
+            <!-- Reason Input / Remarks -->
+            <FormField id="withdraw_reason" label="Reason for Departure / Withdrawal" required>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  <i class="pi pi-comment text-xs"></i>
+                </span>
+                <InputText
+                  id="withdraw_reason"
+                  v-model="withdrawForm.reason"
+                  placeholder="Select a suggestion button above or enter specific reason..."
+                  class="w-full font-medium pl-8"
+                  required
+                />
+              </div>
+              <div class="flex items-center justify-between mt-1">
+                <span class="text-[11px] text-slate-400">
+                  Selected preset can be edited or customized with additional details.
+                </span>
+                <button
+                  v-if="withdrawForm.reason"
+                  type="button"
+                  class="text-[11px] text-rose-600 hover:text-rose-700 font-medium hover:underline"
+                  @click="withdrawForm.reason = ''"
+                >
+                  Clear field
+                </button>
+              </div>
+            </FormField>
           </div>
 
           <!-- Clearance Confirmation Checkbox -->
@@ -2047,6 +2101,18 @@ onMounted(async () => {
 
 .transfer-type-card:hover {
   transform: translateY(-1.5px);
+}
+
+.suggestion-btn {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.suggestion-btn:hover {
+  transform: translateY(-1px);
+}
+
+.suggestion-btn:active {
+  transform: translateY(0);
 }
 
 .profile-card {
