@@ -20,14 +20,15 @@ const api: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
   },
   withCredentials: true,
+  withXSRFToken: true,
   xsrfCookieName: 'XSRF-TOKEN',
   xsrfHeaderName: 'X-XSRF-TOKEN',
 })
 
 // Ensures CSRF cookie is initialized for stateful Sanctum SPA requests
 export async function getCsrfCookie(): Promise<void> {
-  const rootBase = sanitizedBaseUrl || 'http://localhost:8000'
-  await axios.get(`${rootBase}/sanctum/csrf-cookie`, { withCredentials: true })
+  const rootBase = sanitizedBaseUrl || ''
+  await axios.get(`${rootBase}/sanctum/csrf-cookie`, { withCredentials: true, withXSRFToken: true })
 }
 
 // Request Interceptor: Attach bearer token if stored in localStorage
