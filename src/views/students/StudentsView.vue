@@ -739,112 +739,161 @@ onMounted(async () => {
         <span class="text-xs font-semibold tracking-wide uppercase text-slate-400">Loading student dossier...</span>
       </div>
 
-      <div v-else-if="selectedStudent" class="student-dossier-body flex flex-col gap-4 pt-1 max-h-[74vh] overflow-y-auto pr-1">
+      <div v-else-if="selectedStudent" class="student-dossier-body flex flex-col gap-5 pt-2 pb-2 max-h-[75vh] overflow-y-auto px-1">
         <!-- Top Snapshot Cards Row -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div class="snapshot-card bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-3 flex flex-col gap-1">
-            <span class="snapshot-label text-emerald-800 font-semibold text-[11px] uppercase tracking-wider flex items-center gap-1.5">
-              <i class="pi pi-book text-emerald-600 text-xs"></i> Class & Section
-            </span>
-            <span class="font-bold text-slate-900 text-sm truncate">
-              {{ selectedStudent.enrollment?.class || 'Unassigned' }}
-              <span v-if="selectedStudent.enrollment?.section" class="text-xs text-emerald-700 font-medium">({{ selectedStudent.enrollment.section }})</span>
-            </span>
-            <span class="text-[11px] text-slate-500 font-mono">Roll: #{{ selectedStudent.enrollment?.roll_number ?? '—' }}</span>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          <!-- Tile 1: Class & Section -->
+          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <i class="pi pi-book text-emerald-600 text-xs"></i> Class & Section
+              </span>
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            </div>
+            <div class="text-base font-bold text-slate-900 truncate">
+              {{ selectedStudent.enrollment?.class || 'Unassigned Grade' }}
+            </div>
+            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+              <span v-if="selectedStudent.enrollment?.section" class="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                Section: {{ selectedStudent.enrollment.section }}
+              </span>
+              <span class="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-800 font-mono font-bold text-xs">
+                Roll #{{ selectedStudent.enrollment?.roll_number ?? '—' }}
+              </span>
+            </div>
           </div>
 
-          <div class="snapshot-card bg-teal-50/70 border border-teal-200/80 rounded-xl p-3 flex flex-col gap-1">
-            <span class="snapshot-label text-teal-800 font-semibold text-[11px] uppercase tracking-wider flex items-center gap-1.5">
-              <i class="pi pi-calendar text-teal-600 text-xs"></i> Session / Shift
-            </span>
-            <span class="font-bold text-slate-900 text-sm truncate">
+          <!-- Tile 2: Academic Session -->
+          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <i class="pi pi-calendar text-teal-600 text-xs"></i> Academic Session
+              </span>
+              <span class="w-2 h-2 rounded-full bg-teal-500"></span>
+            </div>
+            <div class="text-base font-bold text-slate-900 truncate" :title="selectedStudent.enrollment?.session">
               {{ selectedStudent.enrollment?.session || 'Current Academic Year' }}
-            </span>
-            <span class="text-[11px] text-slate-500 truncate">
-              {{ selectedStudent.enrollment?.shift || 'Morning' }} &bull; {{ selectedStudent.enrollment?.medium || 'Bangla' }}
-            </span>
+            </div>
+            <div class="flex items-center gap-2 mt-2 text-xs text-slate-600 flex-wrap">
+              <span class="px-2 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-teal-800 font-medium text-xs">
+                {{ selectedStudent.enrollment?.shift || 'Morning' }} Shift
+              </span>
+              <span class="text-slate-300">&bull;</span>
+              <span class="text-slate-600 font-medium">{{ selectedStudent.enrollment?.medium || 'Bangla' }} Medium</span>
+            </div>
           </div>
 
-          <div class="snapshot-card bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col gap-1">
-            <span class="snapshot-label text-slate-600 font-semibold text-[11px] uppercase tracking-wider flex items-center gap-1.5">
-              <i class="pi pi-user text-slate-500 text-xs"></i> Demographics
-            </span>
-            <span class="font-bold text-slate-900 text-sm flex items-center gap-1.5">
-              {{ selectedStudent.gender || '—' }}
-              <span v-if="selectedStudent.blood_group" class="text-[10px] text-rose-600 font-bold bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200">{{ selectedStudent.blood_group }}</span>
-            </span>
-            <span class="text-[11px] text-slate-500">{{ selectedStudent.religion || 'Islam' }}</span>
+          <!-- Tile 3: Demographics -->
+          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <i class="pi pi-user text-blue-600 text-xs"></i> Demographics
+              </span>
+              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            </div>
+            <div class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <span>{{ selectedStudent.gender || '—' }}</span>
+              <span class="text-slate-300 font-normal">|</span>
+              <span class="text-sm font-semibold text-slate-700">{{ selectedStudent.religion || 'Islam' }}</span>
+            </div>
+            <div class="mt-2 flex items-center gap-1.5">
+              <span v-if="selectedStudent.blood_group" class="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1">
+                <i class="pi pi-heart-fill text-[9px] text-rose-500"></i> Blood Group: {{ selectedStudent.blood_group }}
+              </span>
+              <span v-else class="text-xs text-slate-400">Blood Group: N/A</span>
+            </div>
           </div>
 
-          <div class="snapshot-card bg-amber-50/70 border border-amber-200/80 rounded-xl p-3 flex flex-col gap-1">
-            <span class="snapshot-label text-amber-800 font-semibold text-[11px] uppercase tracking-wider flex items-center gap-1.5">
-              <i class="pi pi-wallet text-amber-600 text-xs"></i> Opening Arrears
-            </span>
-            <span class="font-mono font-bold text-slate-900 text-sm">
+          <!-- Tile 4: Opening Arrears -->
+          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <i class="pi pi-wallet text-amber-600 text-xs"></i> Opening Arrears
+              </span>
+              <span class="w-2 h-2 rounded-full" :class="(selectedStudent.enrollment?.arrears_balance || 0) > 0 ? 'bg-amber-500' : 'bg-emerald-500'"></span>
+            </div>
+            <div class="text-base font-mono font-extrabold text-slate-900">
               ৳ {{ Number(selectedStudent.enrollment?.arrears_balance || 0).toLocaleString() }}
-            </span>
-            <span class="text-[11px] text-slate-500 truncate">
-              {{ selectedStudent.enrollment?.arrears_balance ? 'Carried from previous term' : 'Clear / Zero Balance' }}
-            </span>
+            </div>
+            <div class="mt-2">
+              <span
+                v-if="(selectedStudent.enrollment?.arrears_balance || 0) > 0"
+                class="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold"
+              >
+                Unpaid Prior Dues
+              </span>
+              <span
+                v-else
+                class="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-1 w-fit"
+              >
+                <i class="pi pi-check text-[10px]"></i> Clear / Zero Balance
+              </span>
+            </div>
           </div>
         </div>
 
         <!-- Section 1: Detailed Bio & Residence Information -->
-        <div class="profile-card border border-slate-200 rounded-xl p-4 bg-white">
-          <div class="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-100">
-            <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-1.5">
-              <i class="pi pi-id-card text-emerald-600"></i> Personal & Institutional Details
+        <div class="profile-card border border-slate-200/90 rounded-xl p-5 bg-white shadow-xs">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 flex-wrap gap-2">
+            <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-2">
+              <i class="pi pi-id-card text-emerald-600 text-sm"></i> Personal & Institutional Details
             </h4>
-            <span class="text-[11px] text-slate-400 font-medium">Registered: {{ formatDate(selectedStudent.created_at) }}</span>
+            <span class="text-xs text-slate-400 font-medium bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200/70">
+              Registered on: <strong class="text-slate-700 font-mono">{{ formatDate(selectedStudent.created_at) }}</strong>
+            </span>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 text-xs">
-            <div class="data-group">
-              <span class="data-label text-slate-400 font-medium block">Date of Birth</span>
-              <span class="data-value font-mono font-semibold text-slate-800">
-                {{ formatDate(selectedStudent.date_of_birth) }}
-                <span v-if="selectedStudent.date_of_birth" class="text-slate-400 font-normal ml-1">({{ calculateAge(selectedStudent.date_of_birth) }})</span>
-              </span>
+            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
+              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Date of Birth</span>
+              <div class="font-mono font-bold text-slate-900 text-sm flex items-center gap-2 flex-wrap">
+                <span>{{ formatDate(selectedStudent.date_of_birth) }}</span>
+                <span v-if="selectedStudent.date_of_birth" class="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 font-sans font-medium text-xs">
+                  {{ calculateAge(selectedStudent.date_of_birth) }}
+                </span>
+              </div>
             </div>
 
-            <div class="data-group">
-              <span class="data-label text-slate-400 font-medium block">Emergency Phone</span>
-              <a
-                v-if="selectedStudent.emergency_phone"
-                :href="'tel:' + selectedStudent.emergency_phone"
-                class="data-value font-mono font-semibold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1"
-              >
-                <i class="pi pi-phone text-[10px]"></i> {{ selectedStudent.emergency_phone }}
-              </a>
-              <span v-else class="text-slate-400">—</span>
+            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
+              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Emergency Phone</span>
+              <div>
+                <a
+                  v-if="selectedStudent.emergency_phone"
+                  :href="'tel:' + selectedStudent.emergency_phone"
+                  class="font-mono font-bold text-emerald-700 hover:text-emerald-800 hover:underline text-sm flex items-center gap-1.5"
+                >
+                  <i class="pi pi-phone text-xs"></i> {{ selectedStudent.emergency_phone }}
+                </a>
+                <span v-else class="text-slate-400 font-medium">Not Registered</span>
+              </div>
             </div>
 
-            <div class="data-group">
-              <span class="data-label text-slate-400 font-medium block">Institutional Status</span>
+            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
+              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Institutional Status</span>
               <div class="mt-0.5">
                 <StatusBadge :status="selectedStudent.status" size="small" showDot />
               </div>
             </div>
 
-            <div class="data-group sm:col-span-2 md:col-span-1">
-              <span class="data-label text-slate-400 font-medium block">Campus Facility</span>
-              <span class="data-value text-slate-800 font-medium flex items-center gap-1">
+            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
+              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Campus Facility</span>
+              <span class="text-slate-900 font-semibold text-sm flex items-center gap-1.5">
                 <i class="pi pi-building text-slate-400 text-xs"></i> Main Academy Campus
               </span>
             </div>
 
-            <div class="data-group sm:col-span-2 md:col-span-2">
-              <span class="data-label text-slate-400 font-medium block">Present Residence</span>
-              <span class="data-value text-slate-800 flex items-start gap-1">
-                <i class="pi pi-home text-slate-400 text-xs mt-0.5 shrink-0"></i>
+            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center sm:col-span-2">
+              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Present Residence</span>
+              <span class="text-slate-800 text-sm leading-relaxed flex items-start gap-1.5 font-medium">
+                <i class="pi pi-home text-slate-400 text-xs mt-1 shrink-0"></i>
                 {{ selectedStudent.present_address || 'Address not registered' }}
               </span>
             </div>
 
-            <div v-if="selectedStudent.permanent_address && selectedStudent.permanent_address !== selectedStudent.present_address" class="data-group sm:col-span-2 md:col-span-3">
-              <span class="data-label text-slate-400 font-medium block">Permanent Address</span>
-              <span class="data-value text-slate-700 flex items-start gap-1">
-                <i class="pi pi-map-marker text-slate-400 text-xs mt-0.5 shrink-0"></i>
+            <div v-if="selectedStudent.permanent_address && selectedStudent.permanent_address !== selectedStudent.present_address" class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center sm:col-span-2 md:col-span-3">
+              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Permanent Address</span>
+              <span class="text-slate-700 text-sm leading-relaxed flex items-start gap-1.5">
+                <i class="pi pi-map-marker text-slate-400 text-xs mt-1 shrink-0"></i>
                 {{ selectedStudent.permanent_address }}
               </span>
             </div>
@@ -852,75 +901,75 @@ onMounted(async () => {
         </div>
 
         <!-- Section 2: Academic Enrollment History (Immutable Ledger) -->
-        <div class="profile-card border border-slate-200 rounded-xl p-4 bg-white">
-          <div class="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-100 flex-wrap gap-2">
+        <div class="profile-card border border-slate-200/90 rounded-xl p-5 bg-white shadow-xs">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 flex-wrap gap-2">
             <div>
-              <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-1.5">
-                <i class="pi pi-history text-emerald-600"></i> Academic Enrollment History
+              <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-2">
+                <i class="pi pi-history text-emerald-600 text-sm"></i> Academic Enrollment History
               </h4>
-              <p class="text-[11px] text-slate-500 mt-0.5">
+              <p class="text-xs text-slate-500 mt-1">
                 Immutable institutional ledger &bull; Records and historical marks are permanently preserved
               </p>
             </div>
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <i class="pi pi-lock text-[9px]"></i> Immutable Ledger
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <i class="pi pi-lock text-[10px]"></i> Immutable Ledger
             </span>
           </div>
 
-          <div v-if="selectedStudent.enrollment_history && selectedStudent.enrollment_history.length > 0" class="overflow-x-auto rounded-lg border border-slate-200">
+          <div v-if="selectedStudent.enrollment_history && selectedStudent.enrollment_history.length > 0" class="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
             <table class="w-full text-left text-xs">
-              <thead class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+              <thead class="bg-slate-50/90 text-slate-600 font-bold border-b border-slate-200 uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th class="py-2.5 px-3">Session</th>
-                  <th class="py-2.5 px-3">Class / Grade</th>
-                  <th class="py-2.5 px-3">Section</th>
-                  <th class="py-2.5 px-3">Roll No</th>
-                  <th class="py-2.5 px-3">Enrollment Status</th>
-                  <th class="py-2.5 px-3">Carried Arrears</th>
-                  <th class="py-2.5 px-3">Enrolled Date</th>
+                  <th class="py-3 px-4">Session</th>
+                  <th class="py-3 px-4">Class / Grade</th>
+                  <th class="py-3 px-4">Section</th>
+                  <th class="py-3 px-4">Roll No</th>
+                  <th class="py-3 px-4">Enrollment Status</th>
+                  <th class="py-3 px-4">Carried Arrears</th>
+                  <th class="py-3 px-4">Enrolled Date</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-slate-100">
+              <tbody class="divide-y divide-slate-100 bg-white">
                 <tr
                   v-for="h in selectedStudent.enrollment_history"
                   :key="h.id"
-                  :class="h.status === 'ACTIVE' || h.status === 'ENROLLED' ? 'bg-emerald-50/40 font-medium' : 'hover:bg-slate-50/60'"
+                  :class="h.status === 'ACTIVE' || h.status === 'ENROLLED' ? 'bg-emerald-50/30' : 'hover:bg-slate-50/60'"
                 >
-                  <td class="py-2 px-3 font-bold text-slate-800">
-                    <div class="flex items-center gap-1.5">
-                      <span v-if="h.status === 'ACTIVE' || h.status === 'ENROLLED'" class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      {{ h.session }}
+                  <td class="py-3.5 px-4 font-bold text-slate-900">
+                    <div class="flex items-center gap-2">
+                      <span v-if="h.status === 'ACTIVE' || h.status === 'ENROLLED'" class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                      <span>{{ h.session }}</span>
                     </div>
                   </td>
-                  <td class="py-2 px-3 text-slate-700">{{ h.class }}</td>
-                  <td class="py-2 px-3 text-slate-700">{{ h.section }}</td>
-                  <td class="py-2 px-3 font-mono font-bold text-slate-900">
-                    <span class="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-800">#{{ h.roll_number }}</span>
+                  <td class="py-3.5 px-4 text-slate-800 font-semibold">{{ h.class }}</td>
+                  <td class="py-3.5 px-4 text-slate-700">{{ h.section }}</td>
+                  <td class="py-3.5 px-4 font-mono font-bold text-slate-900">
+                    <span class="px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200 text-slate-900">#{{ h.roll_number }}</span>
                   </td>
-                  <td class="py-2 px-3">
+                  <td class="py-3.5 px-4">
                     <StatusBadge :status="h.status" size="small" />
                   </td>
-                  <td class="py-2 px-3 font-mono text-slate-700">৳ {{ Number(h.arrears_balance).toLocaleString() }}</td>
-                  <td class="py-2 px-3 font-mono text-slate-500">{{ formatDate(h.created_at) }}</td>
+                  <td class="py-3.5 px-4 font-mono font-semibold text-slate-800">৳ {{ Number(h.arrears_balance).toLocaleString() }}</td>
+                  <td class="py-3.5 px-4 font-mono text-slate-500">{{ formatDate(h.created_at) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <div v-else class="text-xs text-slate-400 p-4 bg-slate-50 rounded-lg text-center flex flex-col items-center gap-1">
-            <i class="pi pi-calendar-times text-slate-300 text-lg"></i>
-            No historical session records found for this student profile.
+          <div v-else class="text-xs text-slate-400 p-6 bg-slate-50/70 border border-slate-100 rounded-xl text-center flex flex-col items-center gap-2">
+            <i class="pi pi-calendar-times text-slate-300 text-2xl"></i>
+            <span>No historical session records found for this student profile.</span>
           </div>
         </div>
 
         <!-- Section 3: Guardians & Authorized Contacts -->
-        <div class="profile-card border border-slate-200 rounded-xl p-4 bg-white">
-          <div class="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-100 flex-wrap gap-2">
+        <div class="profile-card border border-slate-200/90 rounded-xl p-5 bg-white shadow-xs">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 flex-wrap gap-2">
             <div>
-              <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-1.5">
-                <i class="pi pi-shield text-emerald-600"></i> Guardians & Family Contacts
+              <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-2">
+                <i class="pi pi-shield text-emerald-600 text-sm"></i> Guardians & Family Contacts
               </h4>
-              <p class="text-[11px] text-slate-500 mt-0.5">
-                Authorized guardians receiving attendance SMS, report cards, and fee invoices
+              <p class="text-xs text-slate-500 mt-1">
+                Authorized family representatives receiving attendance SMS, report cards, and fee invoices
               </p>
             </div>
             <Button
@@ -929,20 +978,20 @@ onMounted(async () => {
               size="small"
               :severity="showAddGuardian ? 'secondary' : 'success'"
               outlined
-              class="text-xs font-semibold px-3 py-1.5 h-auto"
+              class="text-xs font-semibold px-3.5 py-1.5 h-auto"
               @click="showAddGuardian = !showAddGuardian"
             />
           </div>
 
           <!-- Add Guardian Inline Form -->
-          <div v-if="showAddGuardian" class="p-3.5 mb-3 bg-gradient-to-r from-emerald-50/70 to-teal-50/70 rounded-xl border border-emerald-200 flex flex-col gap-3">
+          <div v-if="showAddGuardian" class="p-4 mb-4 bg-gradient-to-r from-emerald-50/70 to-teal-50/70 rounded-xl border border-emerald-200 flex flex-col gap-3.5">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+              <span class="text-xs font-bold text-emerald-900 flex items-center gap-2">
                 <i class="pi pi-user-plus text-emerald-600"></i> Register & Link New Guardian
               </span>
               <span class="text-[11px] text-emerald-700 font-medium">* Required fields</span>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div class="clean-field-wrap">
                 <i class="pi pi-user field-icon"></i>
                 <input
@@ -972,7 +1021,7 @@ onMounted(async () => {
                 </select>
               </div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div class="clean-field-wrap">
                 <i class="pi pi-envelope field-icon"></i>
                 <input
@@ -993,73 +1042,80 @@ onMounted(async () => {
               </div>
             </div>
             <div class="flex items-center justify-between pt-1">
-              <label class="inline-flex items-center gap-1.5 text-xs text-emerald-900 font-semibold cursor-pointer">
-                <input v-model="guardianForm.is_primary" type="checkbox" class="accent-emerald-600 rounded" />
-                Set as Primary Guardian
+              <label class="inline-flex items-center gap-2 text-xs text-emerald-950 font-semibold cursor-pointer select-none">
+                <input v-model="guardianForm.is_primary" type="checkbox" class="accent-emerald-600 rounded w-4 h-4" />
+                <span>Set as Primary Guardian</span>
               </label>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2.5">
                 <Button label="Cancel" text size="small" severity="secondary" @click="showAddGuardian = false" />
-                <Button label="Save Guardian" icon="pi pi-check" size="small" :loading="addingGuardian" class="brand-gradient-bg border-none px-4" @click="handleAttachGuardian" />
+                <Button label="Save Guardian" icon="pi pi-check" size="small" :loading="addingGuardian" class="brand-gradient-bg border-none px-5 py-2 font-semibold" @click="handleAttachGuardian" />
               </div>
             </div>
           </div>
 
           <!-- Guardian Cards Grid -->
-          <div v-if="selectedStudent.guardians && selectedStudent.guardians.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div v-if="selectedStudent.guardians && selectedStudent.guardians.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div
               v-for="g in selectedStudent.guardians"
               :key="g.id"
-              class="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors flex flex-col gap-2 text-xs"
+              class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-slate-50 transition-colors flex flex-col gap-3 text-xs"
             >
-              <div class="flex justify-between items-center pb-1 border-b border-slate-200/60">
-                <div class="flex items-center gap-2">
-                  <div class="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
+              <!-- Card Header -->
+              <div class="flex items-center justify-between pb-2.5 border-b border-slate-200/80 flex-wrap gap-2">
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-100 to-teal-100 text-emerald-900 border border-emerald-200 flex items-center justify-center font-extrabold text-sm shadow-2xs shrink-0">
                     {{ g.name ? g.name.charAt(0).toUpperCase() : 'G' }}
                   </div>
-                  <div>
-                    <span class="font-bold text-slate-900 text-sm block leading-tight">{{ g.name }}</span>
-                    <span class="text-[11px] text-slate-500 font-medium">{{ g.relationship }}</span>
+                  <div class="min-w-0 flex items-center gap-2 flex-wrap">
+                    <span class="font-bold text-slate-900 text-sm">{{ g.name }}</span>
+                    <span class="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 text-[10px] font-bold tracking-wider uppercase">
+                      {{ g.relationship }}
+                    </span>
                   </div>
                 </div>
+
                 <span
                   v-if="g.is_primary"
-                  class="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1"
+                  class="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shrink-0"
                 >
-                  <i class="pi pi-star-fill text-[9px]"></i> Primary
+                  <i class="pi pi-star-fill text-[9px] text-emerald-700"></i> Primary
                 </span>
               </div>
-              <div class="grid grid-cols-2 gap-1.5 pt-1 text-slate-600">
-                <div class="flex items-center gap-1.5">
-                  <i class="pi pi-phone text-slate-400 text-xs"></i>
-                  <a :href="'tel:' + g.phone" class="font-mono text-slate-800 font-semibold hover:text-emerald-700 hover:underline">{{ g.phone }}</a>
+
+              <!-- Card Details -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-slate-700">
+                <div class="flex items-center gap-2">
+                  <i class="pi pi-phone text-emerald-600 text-xs shrink-0"></i>
+                  <a :href="'tel:' + g.phone" class="font-mono font-bold text-slate-900 hover:text-emerald-700 hover:underline">{{ g.phone }}</a>
                 </div>
-                <div v-if="g.email" class="flex items-center gap-1.5 truncate">
+                <div v-if="g.email" class="flex items-center gap-2 truncate">
                   <i class="pi pi-envelope text-slate-400 text-xs shrink-0"></i>
-                  <span class="truncate" :title="g.email">{{ g.email }}</span>
+                  <span class="truncate font-medium text-slate-600" :title="g.email">{{ g.email }}</span>
                 </div>
-                <div v-if="g.occupation" class="flex items-center gap-1.5 col-span-2">
-                  <i class="pi pi-briefcase text-slate-400 text-xs"></i>
-                  <span>{{ g.occupation }}</span>
+                <div v-if="g.occupation" class="flex items-center gap-2 sm:col-span-2">
+                  <i class="pi pi-briefcase text-slate-400 text-xs shrink-0"></i>
+                  <span class="font-medium text-slate-600">Occupation: <strong class="text-slate-800">{{ g.occupation }}</strong></span>
                 </div>
               </div>
             </div>
           </div>
-          <div v-else class="text-xs text-slate-400 p-4 bg-slate-50 rounded-lg text-center flex flex-col items-center gap-1">
-            <i class="pi pi-users text-slate-300 text-lg"></i>
-            No guardians registered for this student profile.
+          <div v-else class="text-xs text-slate-400 p-6 bg-slate-50/70 border border-slate-100 rounded-xl text-center flex flex-col items-center gap-2">
+            <i class="pi pi-users text-slate-300 text-2xl"></i>
+            <span>No authorized guardians linked to this profile.</span>
           </div>
         </div>
 
         <!-- Dialog Footer Actions -->
-        <div class="flex items-center justify-between pt-3 mt-1 border-t border-slate-200">
-          <span class="text-xs text-slate-400 font-mono">
-            UID: {{ selectedStudent.student_uid }}
-          </span>
+        <div class="flex items-center justify-between pt-4 mt-2 border-t border-slate-200">
+          <div class="flex items-center gap-2 text-xs text-slate-500 font-mono">
+            <span class="text-slate-400">Institutional UID:</span>
+            <strong class="text-slate-800 font-bold bg-slate-100 px-2.5 py-1 rounded border border-slate-200">{{ selectedStudent.student_uid }}</strong>
+          </div>
           <Button
             label="Close Profile"
             severity="secondary"
             outlined
-            class="px-5 font-semibold text-xs"
+            class="px-6 py-2 font-semibold text-xs rounded-lg"
             @click="detailsDialogVisible = false"
           />
         </div>
