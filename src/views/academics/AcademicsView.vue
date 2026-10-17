@@ -553,11 +553,20 @@ async function handleDeleteSubject(subject?: any) {
   }
 }
 
+function applyRoomPreset(roomNumber: string, roomType: 'CLASSROOM' | 'LAB_PHYSICS' | 'LAB_CHEMISTRY' | 'LAB_ICT' | 'AUDITORIUM', capacity: number, buildingName?: string) {
+  roomForm.value.room_number = roomNumber
+  roomForm.value.room_type = roomType
+  roomForm.value.capacity = capacity
+  if (buildingName) {
+    roomForm.value.building_name = buildingName
+  }
+}
+
 function openAddRoomModal() {
   roomForm.value = {
     campus_id: 1,
     room_number: '',
-    building_name: 'Academic Complex',
+    building_name: 'Main Academic Complex',
     capacity: 45,
     room_type: 'CLASSROOM',
   }
@@ -2230,34 +2239,227 @@ onMounted(() => {
     </Dialog>
 
     <!-- Create Room Dialog -->
-    <Dialog v-model:visible="roomDialogVisible" modal header="Register Campus Facility Room" :style="{ width: '460px' }">
-      <form @submit.prevent="handleCreateRoom" class="flex flex-col gap-4 pt-2">
-        <FormField id="rm_no" label="Room Identifier" required>
-          <InputText id="rm_no" v-model="roomForm.room_number" placeholder="e.g. Lab-301, Room 102" class="w-full font-mono" required />
+    <Dialog
+      v-model:visible="roomDialogVisible"
+      modal
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="room-create-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-violet-100 text-violet-700">
+            <i class="pi pi-building"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Register Campus Facility Room</h2>
+              <span class="badge-institutional">Infrastructure</span>
+            </div>
+            <p class="modal-subtitle">Provision classroom spaces, science laboratories, ICT suites, and auditoriums</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleCreateRoom" class="flex flex-col gap-4 pt-1">
+        <!-- Room Identifier with Lead Icon & Quick Presets -->
+        <FormField id="rm_no" label="Room Identifier / Number" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-hashtag field-icon text-indigo-600"></i>
+            <input
+              id="rm_no"
+              v-model="roomForm.room_number"
+              type="text"
+              placeholder="e.g. Room-101, Lab-302, Aud-1"
+              class="clean-input font-mono font-bold uppercase"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('Room 101', 'CLASSROOM', 45)"
+            >
+              Room 101
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('Room 201', 'CLASSROOM', 45)"
+            >
+              Room 201
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('Physics Lab', 'LAB_PHYSICS', 40, 'Science Block')"
+            >
+              Physics Lab
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('Chemistry Lab', 'LAB_CHEMISTRY', 40, 'Science Block')"
+            >
+              Chemistry Lab
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('ICT Lab', 'LAB_ICT', 40, 'ICT Complex')"
+            >
+              ICT Lab
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('Auditorium Hall', 'AUDITORIUM', 150, 'Main Academic Complex')"
+            >
+              Auditorium
+            </button>
+          </div>
         </FormField>
 
-        <FormField id="rm_bld" label="Building / Wing" required>
-          <InputText id="rm_bld" v-model="roomForm.building_name" placeholder="e.g. Science Block, Main Academic Complex" class="w-full" required />
+        <!-- Building / Wing with Lead Icon & Quick Presets -->
+        <FormField id="rm_bld" label="Campus Building / Wing" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-building field-icon text-emerald-600"></i>
+            <input
+              id="rm_bld"
+              v-model="roomForm.building_name"
+              type="text"
+              placeholder="e.g. Main Academic Complex, Science Block"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Complex:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="roomForm.building_name = 'Main Academic Complex'"
+            >
+              Main Complex
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="roomForm.building_name = 'Science Block'"
+            >
+              Science Block
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="roomForm.building_name = 'Administrative Wing'"
+            >
+              Admin Wing
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="roomForm.building_name = 'ICT Complex'"
+            >
+              ICT Complex
+            </button>
+          </div>
         </FormField>
 
-        <div class="grid grid-cols-2 gap-3">
-          <FormField id="rm_type" label="Room Type" required>
-            <select id="rm_type" v-model="roomForm.room_type" class="custom-select w-full">
-              <option value="CLASSROOM">Classroom</option>
-              <option value="LAB_PHYSICS">Physics Lab</option>
-              <option value="LAB_CHEMISTRY">Chemistry Lab</option>
-              <option value="LAB_ICT">ICT Computer Lab</option>
-              <option value="AUDITORIUM">Auditorium</option>
-            </select>
+        <!-- Room Function Type & Seating Capacity Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="rm_type" label="Facility Function / Type" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-sliders-h field-icon text-amber-600"></i>
+              <select
+                id="rm_type"
+                v-model="roomForm.room_type"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="CLASSROOM">Classroom</option>
+                <option value="LAB_PHYSICS">Physics Laboratory</option>
+                <option value="LAB_CHEMISTRY">Chemistry Laboratory</option>
+                <option value="LAB_ICT">ICT Computer Suite</option>
+                <option value="AUDITORIUM">Auditorium / Hall</option>
+              </select>
+            </div>
           </FormField>
-          <FormField id="rm_cap" label="Seat Capacity" required>
-            <input id="rm_cap" v-model.number="roomForm.capacity" type="number" min="1" max="500" class="custom-number-input p-inputtext w-full font-mono" required />
+
+          <FormField id="rm_cap" label="Seating Capacity" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-users field-icon text-teal-600"></i>
+              <input
+                id="rm_cap"
+                v-model.number="roomForm.capacity"
+                type="number"
+                min="1"
+                max="500"
+                placeholder="45"
+                class="clean-input font-mono font-semibold"
+                required
+              />
+            </div>
+            <div class="quick-presets">
+              <span class="preset-label">Seats:</span>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="roomForm.capacity = 35"
+              >
+                35
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="roomForm.capacity = 40"
+              >
+                40
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="roomForm.capacity = 45"
+              >
+                45
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="roomForm.capacity = 50"
+              >
+                50
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="roomForm.capacity = 120"
+              >
+                120
+              </button>
+            </div>
           </FormField>
         </div>
 
-        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="roomDialogVisible = false" />
-          <Button type="submit" label="Register Room" icon="pi pi-check" :loading="roomSubmitting" class="brand-gradient-bg border-none" />
+        <!-- Clean Modal Action Footer -->
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="modal-btn-cancel"
+            @click="roomDialogVisible = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            :disabled="roomSubmitting"
+            class="modal-btn-primary"
+          >
+            <i v-if="roomSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+            <i v-else class="pi pi-check text-xs"></i>
+            <span>{{ roomSubmitting ? 'Registering Room...' : 'Register Room' }}</span>
+          </button>
         </div>
       </form>
     </Dialog>
