@@ -232,13 +232,28 @@ async function handleCreateSession() {
   }
 }
 
+function formatDateForInput(dateVal?: string | Date | null): string {
+  if (!dateVal) return ''
+  if (typeof dateVal === 'string') {
+    const match = dateVal.match(/^\d{4}-\d{2}-\d{2}/)
+    if (match) return match[0]
+  }
+  try {
+    const d = new Date(dateVal)
+    if (isNaN(d.getTime())) return ''
+    return d.toISOString().split('T')[0]
+  } catch {
+    return ''
+  }
+}
+
 function openAddTermModal(session: AcademicSessionRow) {
   selectedSessionForTerm.value = session
   termForm.value = {
     name: '',
     term_code: `T${(session.terms?.length || 0) + 1}`,
-    start_date: session.start_date,
-    end_date: session.end_date,
+    start_date: formatDateForInput(session.start_date),
+    end_date: formatDateForInput(session.end_date),
     is_active: true,
   }
   termDialogVisible.value = true
@@ -268,8 +283,8 @@ function openEditSessionModal(session: AcademicSessionRow) {
   editingSession.value = session
   editSessionForm.value = {
     name: session.name,
-    start_date: session.start_date,
-    end_date: session.end_date,
+    start_date: formatDateForInput(session.start_date),
+    end_date: formatDateForInput(session.end_date),
     status: session.status || 'ACTIVE',
     is_current: Boolean(session.is_current),
   }
@@ -307,8 +322,8 @@ function openEditTermModal(term: AcademicTerm, parentSession?: AcademicSessionRo
   editTermForm.value = {
     name: term.name,
     term_code: term.term_code,
-    start_date: term.start_date,
-    end_date: term.end_date,
+    start_date: formatDateForInput(term.start_date),
+    end_date: formatDateForInput(term.end_date),
     is_active: Boolean(term.is_active),
   }
   editTermDialogVisible.value = true
@@ -556,12 +571,12 @@ onMounted(() => {
         </Column>
         <Column field="start_date" header="Start Date">
           <template #body="{ data }">
-            <span class="font-mono text-xs">{{ data.start_date }}</span>
+            <span class="font-mono text-xs">{{ formatDateForInput(data.start_date) }}</span>
           </template>
         </Column>
         <Column field="end_date" header="End Date">
           <template #body="{ data }">
-            <span class="font-mono text-xs">{{ data.end_date }}</span>
+            <span class="font-mono text-xs">{{ formatDateForInput(data.end_date) }}</span>
           </template>
         </Column>
         <Column header="Configured Terms">
@@ -1075,7 +1090,7 @@ onMounted(() => {
                 <div class="flex flex-col min-w-0">
                   <span class="term-row-name truncate">{{ t.name }}</span>
                   <span v-if="t.start_date && t.end_date" class="term-row-dates font-mono">
-                    {{ t.start_date }} → {{ t.end_date }}
+                    {{ formatDateForInput(t.start_date) }} → {{ formatDateForInput(t.end_date) }}
                   </span>
                 </div>
               </div>
