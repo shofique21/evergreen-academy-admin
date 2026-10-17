@@ -49,6 +49,20 @@ const submittingRollCall = ref(false)
 const currentSessionLockStatus = ref<boolean>(false)
 const existingSessionId = ref<number | null>(null)
 
+function getCurrentTimeString(): string {
+  const now = new Date()
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function resolveCheckInTime(time?: string | null): string {
+  if (time && time.trim() !== '') {
+    return time.length >= 5 ? time.substring(0, 5) : time
+  }
+  return getCurrentTimeString()
+}
+
 // Past Sessions Ledger State
 const sessionsList = ref<AttendanceSession[]>([])
 const sessionsTotal = ref(0)
@@ -68,7 +82,7 @@ const correctionSubmitting = ref(false)
 const correctionForm = ref({
   status: 'PRESENT' as 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED' | 'LEAVE',
   reason: '',
-  check_in_time: '',
+  check_in_time: getCurrentTimeString(),
   remarks: '',
 })
 
@@ -173,7 +187,7 @@ async function loadRoster() {
         name: att.student?.full_name || '',
         roll_number: att.student?.currentEnrollment?.roll_number || 1,
         status: att.status,
-        check_in_time: att.check_in_time || '07:30',
+        check_in_time: resolveCheckInTime(att.check_in_time),
         remarks: att.remarks || '',
       }))
     } else {
@@ -186,13 +200,14 @@ async function loadRoster() {
         },
       })
 
+      const defaultTime = getCurrentTimeString()
       roster.value = (studentsRes.data.data || []).map((s: any, idx: number) => ({
         student_id: s.id,
         student_uid: s.student_uid,
         name: s.name,
         roll_number: s.enrollment?.roll_number || idx + 1,
         status: 'PRESENT',
-        check_in_time: '07:30',
+        check_in_time: defaultTime,
         remarks: '',
       }))
     }
@@ -297,7 +312,7 @@ function openCorrectionModal(att: StudentAttendance) {
   correctionForm.value = {
     status: att.status,
     reason: '',
-    check_in_time: att.check_in_time || '07:30',
+    check_in_time: resolveCheckInTime(att.check_in_time),
     remarks: att.remarks || '',
   }
   correctionModalVisible.value = true
@@ -526,7 +541,7 @@ onMounted(async () => {
                 <input
                   v-model="stu.check_in_time"
                   type="time"
-                  class="p-inputtext p-inputtext-sm font-mono w-24 text-xs"
+                  class="p-inputtext p-inputtext-sm font-mono w-28 text-xs text-center"
                   :disabled="currentSessionLockStatus"
                 />
               </td>
