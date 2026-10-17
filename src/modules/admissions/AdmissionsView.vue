@@ -105,6 +105,44 @@ const enrollForm = ref({
   opening_balance_arrears: 0,
 })
 
+// Student Details Dialog
+const detailsDialogVisible = ref(false)
+const selectedDetailApp = ref<AdmissionApplication | null>(null)
+
+function openDetailsModal(app: AdmissionApplication) {
+  selectedDetailApp.value = app
+  detailsDialogVisible.value = true
+}
+
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const d = new Date(dateStr)
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  } catch {
+    return dateStr
+  }
+}
+
+function calculateAge(dobStr?: string | null): string {
+  if (!dobStr) return ''
+  try {
+    const dob = new Date(dobStr)
+    const diffMs = Date.now() - dob.getTime()
+    const ageDate = new Date(diffMs)
+    const age = Math.abs(ageDate.getUTCFullYear() - 1970)
+    return `${age} yrs`
+  } catch {
+    return ''
+  }
+}
+
+function getInitials(firstName?: string, lastName?: string): string {
+  const f = firstName?.trim()?.charAt(0)?.toUpperCase() || ''
+  const l = lastName?.trim()?.charAt(0)?.toUpperCase() || ''
+  return (f + l) || 'ST'
+}
+
 async function fetchMetadata() {
   try {
     const { data } = await api.get('/api/v1/academics/structure')
@@ -295,8 +333,17 @@ onMounted(async () => {
 
         <Column header="Applicant Name">
           <template #body="{ data }">
-            <div class="flex flex-col">
-              <span class="font-bold text-slate-800">{{ data.first_name }} {{ data.last_name }}</span>
+            <div
+              class="flex flex-col cursor-pointer group"
+              @click="openDetailsModal(data)"
+              title="Click to view student details"
+            >
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-800 group-hover:text-emerald-700 transition-colors">
+                  {{ data.first_name }} {{ data.last_name }}
+                </span>
+                <i class="pi pi-external-link text-[10px] text-slate-400 group-hover:text-emerald-600 transition-colors"></i>
+              </div>
               <span class="text-xs text-slate-500">DOB: {{ data.date_of_birth }} ({{ data.gender }})</span>
             </div>
           </template>
@@ -323,9 +370,18 @@ onMounted(async () => {
           </template>
         </Column>
 
-        <Column header="Actions" style="width: 200px">
+        <Column header="Actions" style="width: 250px">
           <template #body="{ data }">
-            <div class="flex gap-2">
+            <div class="flex items-center gap-1.5">
+              <Button
+                icon="pi pi-eye"
+                label="Details"
+                size="small"
+                outlined
+                severity="secondary"
+                class="hover:text-emerald-700 hover:border-emerald-600 transition-colors"
+                @click="openDetailsModal(data)"
+              />
               <Button
                 v-if="data.status !== 'ENROLLED'"
                 label="Review"
@@ -343,7 +399,7 @@ onMounted(async () => {
                 class="brand-gradient-bg border-none"
                 @click="openEnrollModal(data)"
               />
-              <span v-else-if="data.status === 'ENROLLED'" class="font-mono text-xs text-emerald-700 font-bold">
+              <span v-else-if="data.status === 'ENROLLED'" class="font-mono text-xs text-emerald-700 font-bold px-2 py-1 bg-emerald-50 rounded border border-emerald-200">
                 {{ data.enrolledStudent?.student_uid || 'Enrolled' }}
               </span>
             </div>
@@ -830,6 +886,277 @@ onMounted(async () => {
         </div>
       </div>
     </Dialog>
+
+    <!-- View Student Details Modal Dialog -->
+    <Dialog
+      v-model:visible="detailsDialogVisible"
+      modal
+      :style="{ width: '800px', maxWidth: '96vw' }"
+      class="student-details-dialog"
+    >
+      <template #header>
+        <div v-if="selectedDetailApp" class="modal-header-banner">
+          <div class="applicant-avatar">
+            {{ getInitials(selectedDetailApp.first_name, selectedDetailApp.last_name) }}
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <h2 class="modal-title">
+                {{ selectedDetailApp.first_name }} {{ selectedDetailApp.last_name }}
+              </h2>
+              <span class="ref-badge font-mono font-bold">
+                #{{ selectedDetailApp.application_no }}
+              </span>
+              <StatusBadge :status="selectedDetailApp.status" showDot />
+            </div>
+            <p class="modal-subtitle">
+              Admission Applicant Profile • Grade Applied:
+              <strong>{{ selectedDetailApp.classLevel?.name || ('Class ' + selectedDetailApp.class_id) }}</strong>
+            </p>
+          </div>
+        </div>
+      </template>
+
+      <div v-if="selectedDetailApp" class="details-modal-body">
+        <!-- Quick Summary Cards Bar -->
+        <div class="summary-cards-grid">
+          <div class="summary-card">
+            <span class="summary-label">Target Grade</span>
+            <span class="summary-val font-semibold text-emerald-800">
+              {{ selectedDetailApp.classLevel?.name || 'Class ' + selectedDetailApp.class_id }}
+            </span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-label">Age & DOB</span>
+            <span class="summary-val">
+              {{ formatDate(selectedDetailApp.date_of_birth) }}
+              <span v-if="calculateAge(selectedDetailApp.date_of_birth)" class="text-xs text-slate-500">
+                ({{ calculateAge(selectedDetailApp.date_of_birth) }})
+              </span>
+            </span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-label">Gender & Blood</span>
+            <span class="summary-val">
+              {{ selectedDetailApp.gender }} •
+              <span class="text-rose-600 font-bold">{{ selectedDetailApp.blood_group || 'N/A' }}</span>
+            </span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-label">Pipeline Status</span>
+            <span class="summary-val">
+              <StatusBadge :status="selectedDetailApp.status" />
+            </span>
+          </div>
+        </div>
+
+        <!-- Section 1: Student Demographics & Academic Target -->
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-user text-emerald-600"></i>
+            <span>Student Personal Identification</span>
+          </div>
+
+          <div class="detail-data-grid">
+            <div class="data-item">
+              <span class="data-label">First Name</span>
+              <span class="data-val font-semibold">{{ selectedDetailApp.first_name }}</span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Last Name</span>
+              <span class="data-val font-semibold">{{ selectedDetailApp.last_name }}</span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Date of Birth</span>
+              <span class="data-val font-mono">{{ selectedDetailApp.date_of_birth }}</span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Gender</span>
+              <span class="data-val capitalize">{{ selectedDetailApp.gender }}</span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Blood Group</span>
+              <span class="data-val font-mono font-bold text-rose-600">
+                {{ selectedDetailApp.blood_group || 'Not Specified' }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Religion</span>
+              <span class="data-val">{{ selectedDetailApp.religion || 'Not Specified' }}</span>
+            </div>
+            <div class="data-item col-span-3">
+              <span class="data-label">Previous School Attended</span>
+              <span class="data-val">
+                <i class="pi pi-building text-xs mr-1.5 text-slate-400"></i>
+                {{ selectedDetailApp.previous_school || 'None / Direct Initial Entry' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Contact & Residency Addresses -->
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-map-pin text-emerald-600"></i>
+            <span>Contact & Residential Information</span>
+          </div>
+
+          <div class="detail-data-grid">
+            <div class="data-item">
+              <span class="data-label">Emergency Contact Phone</span>
+              <span class="data-val font-mono font-bold text-emerald-800">
+                <i class="pi pi-phone text-xs mr-1 text-slate-400"></i>
+                {{ selectedDetailApp.emergency_phone }}
+              </span>
+            </div>
+            <div class="data-item col-span-2">
+              <span class="data-label">Present Residential Address</span>
+              <span class="data-val">
+                <i class="pi pi-map-pin text-xs mr-1 text-slate-400"></i>
+                {{ selectedDetailApp.present_address }}
+              </span>
+            </div>
+            <div class="data-item col-span-3">
+              <span class="data-label">Permanent Address</span>
+              <span class="data-val">
+                <i class="pi pi-home text-xs mr-1 text-slate-400"></i>
+                {{ selectedDetailApp.permanent_address || selectedDetailApp.present_address }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Guardian & Family Information -->
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-users text-emerald-600"></i>
+            <span>Primary Guardian / Parent Particulars</span>
+          </div>
+
+          <div class="detail-data-grid">
+            <div class="data-item">
+              <span class="data-label">Guardian Full Name</span>
+              <span class="data-val font-semibold text-slate-800">
+                {{ selectedDetailApp.guardian_name }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Relationship to Student</span>
+              <span class="data-val font-semibold text-emerald-700">
+                {{ selectedDetailApp.guardian_relationship }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Guardian Phone</span>
+              <span class="data-val font-mono font-bold text-slate-800">
+                <i class="pi pi-phone text-xs mr-1 text-slate-400"></i>
+                {{ selectedDetailApp.guardian_phone }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Guardian Email</span>
+              <span class="data-val">
+                <i class="pi pi-envelope text-xs mr-1 text-slate-400"></i>
+                {{ selectedDetailApp.guardian_email || 'Not provided' }}
+              </span>
+            </div>
+            <div class="data-item col-span-2">
+              <span class="data-label">Guardian Occupation</span>
+              <span class="data-val">
+                <i class="pi pi-briefcase text-xs mr-1 text-slate-400"></i>
+                {{ selectedDetailApp.guardian_occupation || 'Not provided' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Academic Review & Registry Information -->
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-shield text-emerald-600"></i>
+            <span>Admissions Review & Enrollment Record</span>
+          </div>
+
+          <div class="detail-data-grid">
+            <div class="data-item">
+              <span class="data-label">Application Reference Number</span>
+              <span class="data-val font-mono font-bold text-emerald-800">
+                {{ selectedDetailApp.application_no }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Current Pipeline Status</span>
+              <span class="data-val">
+                <StatusBadge :status="selectedDetailApp.status" showDot />
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Assigned Reviewer</span>
+              <span class="data-val">
+                {{ selectedDetailApp.reviewer?.name || 'Awaiting Review' }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">Review Decision Timestamp</span>
+              <span class="data-val">
+                {{ formatDate(selectedDetailApp.reviewed_at) }}
+              </span>
+            </div>
+            <div class="data-item col-span-2">
+              <span class="data-label">Reviewer Notes & Verification Assessment</span>
+              <div class="notes-box">
+                {{ selectedDetailApp.review_notes || 'No review remarks recorded yet.' }}
+              </div>
+            </div>
+            <div v-if="selectedDetailApp.enrolledStudent" class="data-item col-span-3 bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
+              <span class="data-label text-emerald-800 font-bold">Enrolled SIS Student Record</span>
+              <div class="flex items-center gap-4 mt-1">
+                <span class="text-xs">Student UID: <strong class="font-mono text-emerald-900">{{ selectedDetailApp.enrolledStudent.student_uid }}</strong></span>
+                <span class="text-xs">Roll Number: <strong class="font-mono text-emerald-900">{{ selectedDetailApp.enrolledStudent.roll_number || 'N/A' }}</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div v-if="selectedDetailApp" class="flex items-center justify-between w-full pt-2">
+          <span class="text-xs text-slate-500 font-mono">
+            Ref: {{ selectedDetailApp.application_no }}
+          </span>
+
+          <div class="flex items-center gap-2">
+            <Button
+              label="Close"
+              severity="secondary"
+              outlined
+              @click="detailsDialogVisible = false"
+            />
+            <Button
+              v-if="selectedDetailApp.status !== 'ENROLLED'"
+              label="Review Application"
+              icon="pi pi-check-square"
+              severity="info"
+              outlined
+              @click="
+                detailsDialogVisible = false;
+                openReviewModal(selectedDetailApp)
+              "
+            />
+            <Button
+              v-if="selectedDetailApp.status === 'APPROVED'"
+              label="Enroll Student"
+              icon="pi pi-user-plus"
+              class="brand-gradient-bg border-none px-4"
+              @click="
+                detailsDialogVisible = false;
+                openEnrollModal(selectedDetailApp)
+              "
+            />
+          </div>
+        </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -1192,5 +1519,160 @@ onMounted(async () => {
   font-size: 0.875rem;
   font-weight: 500;
   outline: none;
+}
+
+/* Student Details Modal Styles */
+.applicant-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #047857 0%, #10b981 100%);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 1.125rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px -1px rgba(4, 120, 87, 0.2);
+  flex-shrink: 0;
+  letter-spacing: 0.05em;
+}
+
+.ref-badge {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+}
+
+.details-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  padding-top: 0.25rem;
+}
+
+.summary-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .summary-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.summary-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.summary-val {
+  font-size: 0.875rem;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.detail-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.section-title-clean {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #0f172a;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.detail-data-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .detail-data-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.data-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.data-item.col-span-2 {
+  grid-column: span 2 / span 2;
+}
+
+.data-item.col-span-3 {
+  grid-column: span 3 / span 3;
+}
+
+@media (max-width: 640px) {
+  .data-item.col-span-2,
+  .data-item.col-span-3 {
+    grid-column: span 1 / span 1;
+  }
+}
+
+.data-label {
+  font-size: 0.725rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.data-val {
+  font-size: 0.875rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  word-break: break-word;
+}
+
+.notes-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.8125rem;
+  color: #475569;
+  font-style: italic;
+  line-height: 1.4;
 }
 </style>
