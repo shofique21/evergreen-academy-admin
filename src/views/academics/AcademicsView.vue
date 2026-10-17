@@ -1046,48 +1046,58 @@ onMounted(() => {
         </label>
 
         <!-- Configured Terms of This Session -->
-        <div v-if="editingSession?.terms && editingSession.terms.length > 0" class="pt-2 border-t border-slate-100">
-          <div class="flex justify-between items-center mb-2">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Terms in this Session ({{ editingSession.terms.length }})
-            </span>
+        <div v-if="editingSession?.terms && editingSession.terms.length > 0" class="session-terms-box">
+          <div class="session-terms-header">
+            <div class="flex items-center gap-2">
+              <i class="pi pi-calendar text-emerald-700 text-xs"></i>
+              <span class="session-terms-title">Configured Terms</span>
+              <span class="session-terms-count">{{ editingSession.terms.length }}</span>
+            </div>
             <button
               type="button"
-              class="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+              class="session-terms-add-btn"
               @click="editSessionDialogVisible = false; openAddTermModal(editingSession)"
+              title="Add a new term to this session"
             >
-              <i class="pi pi-plus text-[10px]"></i> Add Term
+              <i class="pi pi-plus text-[10px]"></i>
+              <span>Add Term</span>
             </button>
           </div>
-          <div class="flex flex-col gap-1.5 max-h-36 overflow-y-auto pr-1">
+
+          <div class="session-terms-list">
             <div
               v-for="t in editingSession.terms"
               :key="t.id"
-              class="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"
+              class="session-term-row"
             >
-              <div class="flex items-center gap-2">
-                <span class="term-dot" :class="t.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                <span class="font-bold text-slate-800">{{ t.name }}</span>
-                <span class="font-mono text-slate-500 text-[11px]">({{ t.term_code }})</span>
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="term-code-badge font-mono">{{ t.term_code }}</span>
+                <div class="flex flex-col min-w-0">
+                  <span class="term-row-name truncate">{{ t.name }}</span>
+                  <span v-if="t.start_date && t.end_date" class="term-row-dates font-mono">
+                    {{ t.start_date }} → {{ t.end_date }}
+                  </span>
+                </div>
               </div>
-              <div class="flex items-center gap-2">
+
+              <div class="flex items-center gap-2 flex-shrink-0">
                 <button
                   type="button"
-                  class="px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors"
-                  :class="t.is_active ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
+                  class="term-status-toggle-pill"
+                  :class="t.is_active ? 'is-active' : 'is-inactive'"
                   title="Click to toggle status"
                   @click="quickToggleTermStatus(t, editingSession)"
                 >
-                  {{ t.is_active ? 'ACTIVE' : 'INACTIVE' }}
+                  <span class="term-dot" :class="t.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                  <span>{{ t.is_active ? 'ACTIVE' : 'INACTIVE' }}</span>
                 </button>
                 <button
                   type="button"
-                  class="mini-term-edit-btn"
+                  class="term-row-edit-action"
                   title="Edit Term Details"
                   @click="editSessionDialogVisible = false; openEditTermModal(t, editingSession)"
                 >
-                  <i class="pi pi-pencil text-[11px]"></i>
-                  <span>Edit</span>
+                  <i class="pi pi-pencil text-xs"></i>
                 </button>
               </div>
             </div>
@@ -1949,5 +1959,169 @@ onMounted(() => {
 .modal-btn-primary:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+/* Configured Terms Section inside Edit Modal */
+.session-terms-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.session-terms-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.55rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.session-terms-title {
+  font-size: 0.725rem;
+  font-weight: 700;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.session-terms-count {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  background: #e2e8f0;
+  color: #475569;
+  border-radius: 9999px;
+}
+
+.session-terms-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.session-terms-add-btn:hover {
+  background: #059669;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+.session-terms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.session-term-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.65rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.session-term-row:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.term-code-badge {
+  font-size: 0.675rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.term-row-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.25;
+}
+
+.term-row-dates {
+  font-size: 0.65rem;
+  color: #64748b;
+  line-height: 1.2;
+}
+
+.term-status-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.term-status-toggle-pill.is-active {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.term-status-toggle-pill.is-active:hover {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+}
+
+.term-status-toggle-pill.is-inactive {
+  background: #f1f5f9;
+  color: #64748b;
+  border-color: #e2e8f0;
+}
+
+.term-status-toggle-pill.is-inactive:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.term-row-edit-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.term-row-edit-action:hover {
+  color: #059669;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  transform: translateY(-1px);
 }
 </style>
