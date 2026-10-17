@@ -406,7 +406,7 @@ onMounted(async () => {
     <!-- 1. Take Attendance Roll-Call Panel -->
     <div v-if="activeTab === 'take'" class="table-card glass-panel flex flex-col gap-5">
       <!-- Selector Controls -->
-      <div class="attendance-filter-bar grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-x-6 xl:gap-x-8 gap-y-5 p-5 sm:p-6 bg-slate-50/90 rounded-2xl border border-slate-200/90 shadow-sm text-xs">
+      <div class="attendance-filter-bar grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4 p-3.5 sm:p-4 bg-slate-50/80 rounded-xl border border-slate-200/80 shadow-xs text-xs">
         <FormField id="roll_class" label="Class / Grade Level" class="min-w-0 attendance-filter-col">
           <select id="roll_class" v-model="selectedClassId" class="attendance-filter-input">
             <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
@@ -922,53 +922,61 @@ onMounted(async () => {
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
-  font-size: 0.8125rem !important;
-  font-weight: 600 !important;
-  color: #334155 !important;
-  line-height: 1.25rem !important;
-  height: 1.25rem !important;
+  font-size: 0.6875rem !important; /* 11px */
+  font-weight: 700 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: #64748b !important;
+  line-height: 1rem !important;
+  height: 1rem !important;
   display: flex !important;
   align-items: center !important;
 }
 
 .attendance-filter-bar :deep(.field-label-row) {
-  height: 1.25rem !important;
-  min-height: 1.25rem !important;
+  height: 1rem !important;
+  min-height: 1rem !important;
   display: flex !important;
   align-items: center !important;
+  margin-bottom: 0.25rem !important;
 }
 
 .attendance-filter-label-spacer {
-  height: 1.25rem;
-  min-height: 1.25rem;
-  line-height: 1.25rem;
-  margin-bottom: 0.35rem;
+  height: 1rem;
+  min-height: 1rem;
+  line-height: 1rem;
+  margin-bottom: 0.25rem;
   display: block;
 }
 
 .attendance-filter-input {
   width: 100% !important;
-  height: 42px !important;
-  min-height: 42px !important;
-  max-height: 42px !important;
-  padding: 0 0.875rem !important;
-  font-size: 0.875rem !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  padding: 0 0.75rem !important;
+  font-size: 0.8125rem !important; /* 13px */
   font-weight: 500 !important;
   font-family: inherit !important;
-  color: #334155 !important;
+  color: #1e293b !important;
   background-color: #ffffff !important;
   border: 1px solid #cbd5e1 !important;
   border-radius: 0.5rem !important;
   box-sizing: border-box !important;
   outline: none !important;
-  transition: all 0.2s ease !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
+  transition: all 0.15s ease-in-out !important;
   display: block !important;
-  line-height: 40px !important;
+  line-height: 34px !important;
+}
+
+.attendance-filter-input:hover {
+  border-color: #94a3b8 !important;
 }
 
 .attendance-filter-input:focus {
   border-color: #059669 !important;
-  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15) !important;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12) !important;
 }
 
 select.attendance-filter-input {
@@ -977,9 +985,9 @@ select.attendance-filter-input {
   -moz-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  background-size: 1rem 1rem;
-  padding-right: 2.25rem !important;
+  background-position: right 0.65rem center;
+  background-size: 0.85rem 0.85rem;
+  padding-right: 2rem !important;
   cursor: pointer;
 }
 
@@ -988,16 +996,28 @@ input[type="date"].attendance-filter-input {
 }
 
 .attendance-filter-btn {
-  height: 42px !important;
-  min-height: 42px !important;
-  max-height: 42px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
   width: 100% !important;
-  font-size: 0.875rem !important;
+  font-size: 0.8125rem !important;
   font-weight: 600 !important;
   border-radius: 0.5rem !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
+  gap: 0.35rem !important;
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+.attendance-filter-btn:hover {
+  background-color: #f8fafc !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
 }
 
 .status-btn-group {
