@@ -148,15 +148,31 @@ const transferForm = ref({
   reason: '',
 })
 const transferSectionsList = ref<{ id: number; name: string }[]>([])
+const transferReasonSuggestions = [
+  'Parent Request',
+  'Academic Section Rebalancing',
+  'Track / Medium Adjustment',
+  'Family Relocation',
+  'Transfer to Another School',
+]
 
 // Withdraw Dialog
 const withdrawDialogVisible = ref(false)
 const withdrawing = ref(false)
 const withdrawTargetStudent = ref<StudentRecord | null>(null)
+const withdrawClearanceConfirmed = ref(true)
 const withdrawForm = ref({
   exit_date: new Date().toISOString().substring(0, 10),
   reason: '',
 })
+const withdrawReasonSuggestions = [
+  'Family Relocation',
+  'Admitted to Another Institution',
+  'Emigration / Relocating Abroad',
+  'Medical / Health Reasons',
+  'Financial Circumstances',
+  'Personal / Family Decision',
+]
 
 // Batch Promotion Dialog
 const promoteDialogVisible = ref(false)
@@ -324,19 +340,31 @@ async function handleAttachGuardian() {
 
 function openTransferDialog(student: StudentRecord) {
   transferTargetStudent.value = student
+  const currentClass = classesList.value.find((c) => c.name === student.enrollment?.class)
+  transferSectionsList.value = currentClass?.sections || []
+
+  // Pre-select alternate section if available
+  const alternateSection = transferSectionsList.value.find((s) => s.name !== student.enrollment?.section)
+
   transferForm.value = {
     type: 'SECTION_TRANSFER',
-    target_section_id: '',
+    target_section_id: alternateSection ? alternateSection.id : (transferSectionsList.value[0]?.id || ''),
     new_roll: (student.enrollment?.roll_number || 1) + 1,
     reason: '',
   }
-  const currentClass = classesList.value.find((c) => c.name === student.enrollment?.class)
-  transferSectionsList.value = currentClass?.sections || []
   transferDialogVisible.value = true
 }
 
 async function handleExecuteTransfer() {
   if (!transferTargetStudent.value) return
+  if (transferForm.value.type === 'SECTION_TRANSFER' && !transferForm.value.target_section_id) {
+    notifyWarn('Validation', 'Please select a target section for the transfer.')
+    return
+  }
+  if (!transferForm.value.reason?.trim()) {
+    notifyWarn('Validation', 'Please provide a reason or administrative remarks for the transfer.')
+    return
+  }
   try {
     transferring.value = true
     await api.post(`/api/v1/students/${transferTargetStudent.value.id}/transfer`, transferForm.value)
@@ -357,12 +385,17 @@ function openWithdrawDialog(student: StudentRecord) {
     exit_date: new Date().toISOString().substring(0, 10),
     reason: '',
   }
+  withdrawClearanceConfirmed.value = true
   withdrawDialogVisible.value = true
 }
 
 async function handleExecuteWithdraw() {
-  if (!withdrawTargetStudent.value || !withdrawForm.value.reason) {
-    notifyWarn('Validation', 'Please state a reason for withdrawal.')
+  if (!withdrawTargetStudent.value || !withdrawForm.value.reason?.trim()) {
+    notifyWarn('Validation', 'Please state a reason for departure / withdrawal.')
+    return
+  }
+  if (!withdrawClearanceConfirmed.value) {
+    notifyWarn('Clearance Required', 'Please confirm that institutional clearances have been reviewed.')
     return
   }
   try {
@@ -1126,63 +1159,241 @@ onMounted(async () => {
     <Dialog
       v-model:visible="transferDialogVisible"
       modal
-      header="Execute Student Transfer Workflow"
-      :style="{ width: '500px' }"
+      :style="{ width: '600px', maxWidth: '96vw' }"
+      class="clean-workflow-dialog"
     >
-      <form v-if="transferTargetStudent" @submit.prevent="handleExecuteTransfer" class="flex flex-col gap-4 pt-2">
-        <div class="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
-          <span class="font-bold text-slate-800 block text-sm">{{ transferTargetStudent.name }} ({{ transferTargetStudent.student_uid }})</span>
-          <span class="text-slate-600 block mt-1">
-            Current: {{ transferTargetStudent.enrollment?.class }} • {{ transferTargetStudent.enrollment?.section }} (Roll: {{ transferTargetStudent.enrollment?.roll_number }})
-          </span>
+      <template #header>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 shadow-xs">
+            <i class="pi pi-arrows-h text-lg"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-800 leading-snug">Execute Student Transfer Workflow</h3>
+            <p class="text-xs text-slate-500">Reassign section or process institutional transfer-out clearance</p>
+          </div>
+        </div>
+      </template>
+
+      <form v-if="transferTargetStudent" @submit.prevent="handleExecuteTransfer" class="flex flex-col gap-5 pt-2">
+        <!-- Student Identity & Placement Header -->
+        <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+                {{ getInitials(transferTargetStudent.name) }}
+              </div>
+              <div class="min-w-0">
+                <h4 class="font-bold text-slate-800 text-sm truncate leading-snug">
+                  {{ transferTargetStudent.name }}
+                </h4>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="font-mono text-xs text-slate-500 font-medium">UID: {{ transferTargetStudent.student_uid }}</span>
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-emerald-100 text-emerald-800">
+                    {{ transferTargetStudent.status }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Arrears Balance</span>
+              <span
+                class="text-xs font-bold font-mono"
+                :class="(transferTargetStudent.enrollment?.arrears_balance || 0) > 0 ? 'text-amber-600' : 'text-emerald-700'"
+              >
+                ৳ {{ transferTargetStudent.enrollment?.arrears_balance || 0 }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Current Academic Placement Pills -->
+          <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/80 text-xs">
+            <div class="bg-white rounded-lg p-2.5 border border-slate-200">
+              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Grade / Class</span>
+              <span class="font-bold text-slate-800">{{ transferTargetStudent.enrollment?.class || '—' }}</span>
+            </div>
+            <div class="bg-white rounded-lg p-2.5 border border-slate-200">
+              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Current Section</span>
+              <span class="font-bold text-slate-800">{{ transferTargetStudent.enrollment?.section || '—' }}</span>
+            </div>
+            <div class="bg-white rounded-lg p-2.5 border border-slate-200">
+              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Current Roll</span>
+              <span class="font-bold text-slate-800">#{{ transferTargetStudent.enrollment?.roll_number || '—' }}</span>
+            </div>
+          </div>
         </div>
 
-        <FormField id="transfer_type" label="Transfer Type" required>
-          <select id="transfer_type" v-model="transferForm.type" class="custom-select w-full" required>
-            <option value="SECTION_TRANSFER">Intra-Class Section Reassignment</option>
-            <option value="TRANSFER_OUT">Transfer Out to Another Institution</option>
-          </select>
-        </FormField>
+        <!-- Transfer Workflow Type Selection Cards -->
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
+            Select Transfer Workflow Type <span class="text-red-500">*</span>
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <!-- Option 1: Intra-Class Section Reassignment -->
+            <div
+              class="transfer-type-card cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between"
+              :class="transferForm.type === 'SECTION_TRANSFER'
+                ? 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20 shadow-xs'
+                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60'"
+              @click="transferForm.type = 'SECTION_TRANSFER'"
+            >
+              <div class="flex items-start gap-3">
+                <div
+                  class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+                  :class="transferForm.type === 'SECTION_TRANSFER' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'"
+                >
+                  <i class="pi pi-arrows-h text-sm"></i>
+                </div>
+                <div class="min-w-0">
+                  <span class="font-bold text-sm block" :class="transferForm.type === 'SECTION_TRANSFER' ? 'text-emerald-950' : 'text-slate-800'">
+                    Section Transfer
+                  </span>
+                  <span class="text-xs text-slate-500 leading-relaxed block mt-0.5">
+                    Move student to a different section within the same grade with a new roll number.
+                  </span>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-200/60 text-[11px] font-semibold"
+                :class="transferForm.type === 'SECTION_TRANSFER' ? 'text-emerald-700' : 'text-slate-400'"
+              >
+                <i :class="transferForm.type === 'SECTION_TRANSFER' ? 'pi pi-check-circle' : 'pi pi-circle'"></i>
+                <span>{{ transferForm.type === 'SECTION_TRANSFER' ? 'Selected Workflow' : 'Click to select' }}</span>
+              </div>
+            </div>
 
-        <template v-if="transferForm.type === 'SECTION_TRANSFER'">
-          <FormField id="target_section" label="Target Section" required>
-            <select id="target_section" v-model="transferForm.target_section_id" class="custom-select w-full" required>
-              <option value="" disabled>Select Target Section</option>
-              <option v-for="sec in transferSectionsList" :key="sec.id" :value="sec.id">{{ sec.name }}</option>
-            </select>
-          </FormField>
+            <!-- Option 2: Institutional Transfer Out -->
+            <div
+              class="transfer-type-card cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between"
+              :class="transferForm.type === 'TRANSFER_OUT'
+                ? 'border-blue-500 bg-blue-50/50 ring-2 ring-blue-500/20 shadow-xs'
+                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60'"
+              @click="transferForm.type = 'TRANSFER_OUT'"
+            >
+              <div class="flex items-start gap-3">
+                <div
+                  class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+                  :class="transferForm.type === 'TRANSFER_OUT' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'"
+                >
+                  <i class="pi pi-external-link text-sm"></i>
+                </div>
+                <div class="min-w-0">
+                  <span class="font-bold text-sm block" :class="transferForm.type === 'TRANSFER_OUT' ? 'text-blue-950' : 'text-slate-800'">
+                    Transfer Out
+                  </span>
+                  <span class="text-xs text-slate-500 leading-relaxed block mt-0.5">
+                    Formal departure to another institution with institutional transfer clearance.
+                  </span>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-200/60 text-[11px] font-semibold"
+                :class="transferForm.type === 'TRANSFER_OUT' ? 'text-blue-700' : 'text-slate-400'"
+              >
+                <i :class="transferForm.type === 'TRANSFER_OUT' ? 'pi pi-check-circle' : 'pi pi-circle'"></i>
+                <span>{{ transferForm.type === 'TRANSFER_OUT' ? 'Selected Workflow' : 'Click to select' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-          <FormField id="new_roll" label="New Roll Number in Target Section" required>
-            <input
-              id="new_roll"
-              v-model.number="transferForm.new_roll"
-              type="number"
-              min="1"
-              max="500"
-              class="custom-number-input p-inputtext w-full font-mono font-bold"
+        <!-- Section Reassignment Parameters (when SECTION_TRANSFER) -->
+        <div v-if="transferForm.type === 'SECTION_TRANSFER'" class="space-y-3.5 bg-emerald-50/40 rounded-xl p-4 border border-emerald-100">
+          <div class="flex items-center justify-between pb-2 border-b border-emerald-200/60">
+            <span class="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+              <i class="pi pi-sliders-h text-emerald-600"></i> New Section & Roll Assignment
+            </span>
+            <span class="text-[11px] text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+              Grade: <strong>{{ transferTargetStudent.enrollment?.class }}</strong>
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+            <FormField id="target_section" label="Target Section" required>
+              <select id="target_section" v-model="transferForm.target_section_id" class="clean-select w-full" required>
+                <option value="" disabled>Select Target Section</option>
+                <option
+                  v-for="sec in transferSectionsList"
+                  :key="sec.id"
+                  :value="sec.id"
+                  :disabled="sec.name === transferTargetStudent.enrollment?.section"
+                >
+                  Section {{ sec.name }} {{ sec.name === transferTargetStudent.enrollment?.section ? '(Current)' : '' }}
+                </option>
+              </select>
+            </FormField>
+
+            <FormField id="new_roll" label="New Roll Number in Target Section" required>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-sm">#</span>
+                <input
+                  id="new_roll"
+                  v-model.number="transferForm.new_roll"
+                  type="number"
+                  min="1"
+                  max="500"
+                  placeholder="e.g. 5"
+                  class="clean-input w-full font-mono font-bold pl-7"
+                  required
+                />
+              </div>
+            </FormField>
+          </div>
+        </div>
+
+        <!-- Transfer Out Explanatory Protocol (when TRANSFER_OUT) -->
+        <div v-else-if="transferForm.type === 'TRANSFER_OUT'" class="bg-blue-50/70 rounded-xl p-4 border border-blue-200/80 space-y-2">
+          <div class="flex items-center gap-2 text-blue-900 font-bold text-xs uppercase tracking-wider">
+            <i class="pi pi-shield text-blue-600"></i>
+            <span>Institutional Departure Protocol</span>
+          </div>
+          <ul class="text-xs text-blue-900/90 space-y-1 pl-4 list-disc leading-relaxed">
+            <li>Student status will transition to <strong class="font-bold text-blue-950">TRANSFERRED_OUT</strong>.</li>
+            <li>Releases current seat in Section <strong>{{ transferTargetStudent.enrollment?.section }}</strong>.</li>
+            <li>Historical marks, transcripts, and financial records remain permanently preserved in the immutable ledger.</li>
+          </ul>
+        </div>
+
+        <!-- Reason / Administrative Remarks -->
+        <div class="space-y-2">
+          <FormField id="transfer_reason" label="Reason for Transfer / Administrative Remarks" required>
+            <InputText
+              id="transfer_reason"
+              v-model="transferForm.reason"
+              placeholder="e.g. Parent requested shift to section Meghna / Family relocation"
+              class="w-full"
               required
             />
           </FormField>
-        </template>
 
-        <FormField id="transfer_reason" label="Reason for Transfer" required>
-          <InputText
-            id="transfer_reason"
-            v-model="transferForm.reason"
-            placeholder="e.g. Medium change, parent request, relocation"
-            class="w-full"
-            required
+          <!-- Quick Suggestions -->
+          <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+            <span class="text-[11px] text-slate-400 font-medium mr-1">Suggestions:</span>
+            <button
+              v-for="sug in transferReasonSuggestions"
+              :key="sug"
+              type="button"
+              class="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 transition-colors"
+              @click="transferForm.reason = sug"
+            >
+              {{ sug }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
+          <Button
+            label="Cancel"
+            severity="secondary"
+            text
+            @click="transferDialogVisible = false"
           />
-        </FormField>
-
-        <div class="flex justify-end gap-2 mt-3 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="transferDialogVisible = false" />
           <Button
             type="submit"
-            label="Confirm Transfer"
-            icon="pi pi-check"
+            :label="transferForm.type === 'SECTION_TRANSFER' ? 'Confirm Section Transfer' : 'Execute Transfer Out'"
+            :icon="transferForm.type === 'SECTION_TRANSFER' ? 'pi pi-check' : 'pi pi-external-link'"
             :loading="transferring"
-            class="brand-gradient-bg border-none"
+            :class="transferForm.type === 'SECTION_TRANSFER' ? 'brand-gradient-bg border-none' : 'bg-blue-600 hover:bg-blue-700 text-white border-none'"
           />
         </div>
       </form>
@@ -1192,41 +1403,149 @@ onMounted(async () => {
     <Dialog
       v-model:visible="withdrawDialogVisible"
       modal
-      header="Record Student Withdrawal"
-      :style="{ width: '460px' }"
+      :style="{ width: '580px', maxWidth: '96vw' }"
+      class="clean-workflow-dialog"
     >
-      <form v-if="withdrawTargetStudent" @submit.prevent="handleExecuteWithdraw" class="flex flex-col gap-4 pt-2">
-        <div class="p-3 bg-red-50 text-red-900 rounded-lg border border-red-200 text-xs">
-          <span class="font-bold block text-sm">{{ withdrawTargetStudent.name }} ({{ withdrawTargetStudent.student_uid }})</span>
-          <span class="block mt-1">Withdrawing marks enrollment as inactive and issues formal clearance status.</span>
+      <template #header>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 shadow-xs">
+            <i class="pi pi-user-minus text-lg"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-800 leading-snug">Record Student Withdrawal</h3>
+            <p class="text-xs text-slate-500">Record formal institutional departure and archive enrollment</p>
+          </div>
+        </div>
+      </template>
+
+      <form v-if="withdrawTargetStudent" @submit.prevent="handleExecuteWithdraw" class="flex flex-col gap-5 pt-2">
+        <!-- Student Identity & Placement Header -->
+        <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-full bg-slate-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+                {{ getInitials(withdrawTargetStudent.name) }}
+              </div>
+              <div class="min-w-0">
+                <h4 class="font-bold text-slate-800 text-sm truncate leading-snug">
+                  {{ withdrawTargetStudent.name }}
+                </h4>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="font-mono text-xs text-slate-500 font-medium">UID: {{ withdrawTargetStudent.student_uid }}</span>
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-emerald-100 text-emerald-800">
+                    {{ withdrawTargetStudent.status }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Current Seat</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ withdrawTargetStudent.enrollment?.class }} • {{ withdrawTargetStudent.enrollment?.section }} (Roll #{{ withdrawTargetStudent.enrollment?.roll_number }})
+              </span>
+            </div>
+          </div>
+
+          <!-- Financial Arrears Clearance Audit -->
+          <div
+            class="rounded-lg p-2.5 text-xs flex items-center justify-between border"
+            :class="(withdrawTargetStudent.enrollment?.arrears_balance || 0) > 0
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'"
+          >
+            <div class="flex items-center gap-2">
+              <i :class="(withdrawTargetStudent.enrollment?.arrears_balance || 0) > 0 ? 'pi pi-exclamation-circle text-amber-600' : 'pi pi-check-circle text-emerald-600'"></i>
+              <span class="font-medium">
+                {{ (withdrawTargetStudent.enrollment?.arrears_balance || 0) > 0
+                  ? 'Outstanding Fees Caution: Ensure settlement before issuing clearance'
+                  : 'Financial Clearance: Zero Outstanding Balance' }}
+              </span>
+            </div>
+            <span class="font-bold font-mono text-sm">৳ {{ withdrawTargetStudent.enrollment?.arrears_balance || 0 }}</span>
+          </div>
         </div>
 
-        <FormField id="exit_date" label="Withdrawal / Exit Date" required>
-          <InputText
-            id="exit_date"
-            v-model="withdrawForm.exit_date"
-            type="date"
-            class="w-full font-mono"
-            required
-          />
-        </FormField>
+        <!-- Institutional Record Notice -->
+        <div class="p-3.5 bg-rose-50 text-rose-950 rounded-xl border border-rose-200 text-xs space-y-1.5">
+          <div class="flex items-center gap-2 font-bold text-rose-800 uppercase tracking-wider text-[11px]">
+            <i class="pi pi-exclamation-triangle text-rose-600"></i>
+            <span>Institutional Audit Protocol</span>
+          </div>
+          <p class="leading-relaxed text-rose-900">
+            Withdrawing permanently transitions the student status to <strong class="font-bold">INACTIVE</strong> and archives current enrollment as <strong class="font-bold">WITHDRAWN</strong>.
+            All historical marks, attendance, and transcripts remain preserved in the immutable ledger.
+          </p>
+        </div>
 
-        <FormField id="withdraw_reason" label="Reason for Departure" required>
-          <InputText
-            id="withdraw_reason"
-            v-model="withdrawForm.reason"
-            placeholder="e.g. Family relocation, transferred abroad"
-            class="w-full"
-            required
-          />
-        </FormField>
+        <!-- Inputs: Exit Date and Reason -->
+        <div class="space-y-4">
+          <FormField id="exit_date" label="Official Withdrawal / Exit Date" required>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <i class="pi pi-calendar text-xs"></i>
+              </span>
+              <InputText
+                id="exit_date"
+                v-model="withdrawForm.exit_date"
+                type="date"
+                class="w-full font-mono pl-8"
+                required
+              />
+            </div>
+            <span class="text-[11px] text-slate-400 mt-1 block">Official date recorded on transfer clearance certificates.</span>
+          </FormField>
 
-        <div class="flex justify-end gap-2 mt-3 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="withdrawDialogVisible = false" />
+          <div class="space-y-2">
+            <FormField id="withdraw_reason" label="Reason for Departure / Withdrawal" required>
+              <InputText
+                id="withdraw_reason"
+                v-model="withdrawForm.reason"
+                placeholder="e.g. Family relocation, transferred abroad, personal family decision"
+                class="w-full"
+                required
+              />
+            </FormField>
+
+            <!-- Quick Suggestions -->
+            <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span class="text-[11px] text-slate-400 font-medium mr-1">Suggestions:</span>
+              <button
+                v-for="sug in withdrawReasonSuggestions"
+                :key="sug"
+                type="button"
+                class="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 transition-colors"
+                @click="withdrawForm.reason = sug"
+              >
+                {{ sug }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Clearance Confirmation Checkbox -->
+          <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-lg border border-slate-200 bg-slate-50/60 hover:bg-slate-50 text-xs transition-colors">
+            <input
+              type="checkbox"
+              v-model="withdrawClearanceConfirmed"
+              class="mt-0.5 rounded text-rose-600 focus:ring-rose-500 border-slate-300"
+            />
+            <span class="text-slate-700 leading-snug">
+              I confirm that institutional clearances (library books, accounts/fees, and identity card) have been reviewed.
+            </span>
+          </label>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
+          <Button
+            label="Cancel"
+            severity="secondary"
+            text
+            @click="withdrawDialogVisible = false"
+          />
           <Button
             type="submit"
-            label="Confirm Withdrawal"
-            icon="pi pi-times-circle"
+            label="Confirm & Process Withdrawal"
+            icon="pi pi-user-minus"
             severity="danger"
             :loading="withdrawing"
           />
@@ -1694,6 +2013,14 @@ onMounted(async () => {
 
 .snapshot-card:hover {
   transform: translateY(-1px);
+}
+
+.transfer-type-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transfer-type-card:hover {
+  transform: translateY(-1.5px);
 }
 
 .profile-card {
