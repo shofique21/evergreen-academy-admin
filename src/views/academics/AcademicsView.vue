@@ -115,6 +115,30 @@ const termForm = ref({
   is_active: true,
 })
 
+// Edit Session Modal State
+const editSessionDialogVisible = ref(false)
+const editSessionSubmitting = ref(false)
+const editingSession = ref<AcademicSessionRow | null>(null)
+const editSessionForm = ref({
+  name: '',
+  start_date: '',
+  end_date: '',
+  status: 'ACTIVE',
+  is_current: false,
+})
+
+// Edit Term Modal State
+const editTermDialogVisible = ref(false)
+const editTermSubmitting = ref(false)
+const editingTerm = ref<AcademicTerm | null>(null)
+const editTermForm = ref({
+  name: '',
+  term_code: '',
+  start_date: '',
+  end_date: '',
+  is_active: true,
+})
+
 // Section Modal
 const sectionDialogVisible = ref(false)
 const sectionSubmitting = ref(false)
@@ -237,6 +261,114 @@ async function handleCreateTerm() {
     notifyError('Term Error', errorObj.message || 'Could not register term.')
   } finally {
     termSubmitting.value = false
+  }
+}
+
+function openEditSessionModal(session: AcademicSessionRow) {
+  editingSession.value = session
+  editSessionForm.value = {
+    name: session.name,
+    start_date: session.start_date,
+    end_date: session.end_date,
+    status: session.status || 'ACTIVE',
+    is_current: Boolean(session.is_current),
+  }
+  editSessionDialogVisible.value = true
+}
+
+async function handleUpdateSession() {
+  if (!editingSession.value) return
+  if (!editSessionForm.value.name || !editSessionForm.value.start_date || !editSessionForm.value.end_date) {
+    notifyWarn('Validation Required', 'Please provide session name, start date, and end date.')
+    return
+  }
+
+  try {
+    editSessionSubmitting.value = true
+    await api.put(`/api/v1/academics/years/${editingSession.value.id}`, editSessionForm.value)
+    notifySuccess('Session Updated', `Academic session "${editSessionForm.value.name}" updated successfully.`)
+    editSessionDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Session Error', errorObj.message || 'Could not update academic session.')
+  } finally {
+    editSessionSubmitting.value = false
+  }
+}
+
+function openEditTermModal(term: AcademicTerm, parentSession?: AcademicSessionRow) {
+  if (parentSession) {
+    selectedSessionForTerm.value = parentSession
+  } else {
+    selectedSessionForTerm.value = sessions.value.find(s => s.terms?.some(t => t.id === term.id)) || null
+  }
+  editingTerm.value = term
+  editTermForm.value = {
+    name: term.name,
+    term_code: term.term_code,
+    start_date: term.start_date,
+    end_date: term.end_date,
+    is_active: Boolean(term.is_active),
+  }
+  editTermDialogVisible.value = true
+}
+
+async function handleUpdateTerm() {
+  if (!editingTerm.value) return
+  if (!editTermForm.value.name || !editTermForm.value.term_code || !editTermForm.value.start_date || !editTermForm.value.end_date) {
+    notifyWarn('Validation Required', 'Please provide term title, code, and date boundaries.')
+    return
+  }
+
+  try {
+    editTermSubmitting.value = true
+    await api.put(`/api/v1/academics/terms/${editingTerm.value.id}`, editTermForm.value)
+    notifySuccess('Term Updated', `Academic term "${editTermForm.value.name}" updated successfully.`)
+    editTermDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Term Error', errorObj.message || 'Could not update academic term.')
+  } finally {
+    editTermSubmitting.value = false
+  }
+}
+
+async function handleDeleteTerm() {
+  if (!editingTerm.value) return
+  const confirmed = window.confirm(`Are you sure you want to delete term "${editTermForm.value.name}"? This action cannot be reversed.`)
+  if (!confirmed) return
+
+  try {
+    editTermSubmitting.value = true
+    await api.delete(`/api/v1/academics/terms/${editingTerm.value.id}`)
+    notifySuccess('Term Deleted', 'Academic term removed successfully.')
+    editTermDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Delete Error', errorObj.message || 'Could not delete academic term.')
+  } finally {
+    editTermSubmitting.value = false
+  }
+}
+
+async function quickToggleTermStatus(term: AcademicTerm, session?: AcademicSessionRow, event?: Event) {
+  if (event) event.stopPropagation()
+  try {
+    const newStatus = !term.is_active
+    await api.put(`/api/v1/academics/terms/${term.id}`, { is_active: newStatus })
+    notifySuccess('Status Updated', `Term "${term.name}" is now ${newStatus ? 'ACTIVE' : 'INACTIVE'}.`)
+    await fetchAcademicData()
+    // Update local editingSession term if open
+    if (editingSession.value && editingSession.value.terms) {
+      const target = editingSession.value.terms.find(t => t.id === term.id)
+      if (target) target.is_active = newStatus
+    }
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Status Error', errorObj.message || 'Could not update term status.')
   }
 }
 
@@ -434,33 +566,77 @@ onMounted(() => {
         </Column>
         <Column header="Configured Terms">
           <template #body="{ data }">
-            <div class="flex flex-wrap gap-1 items-center">
-              <span
+            <div class="flex flex-wrap gap-1.5 items-center">
+              <button
                 v-for="t in data.terms || []"
                 :key="t.id"
-                class="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200"
+                type="button"
+                class="term-chip-btn group"
+                :class="{ 'is-active': t.is_active, 'is-inactive': !t.is_active }"
+                @click="openEditTermModal(t, data)"
+                :title="`Click to edit ${t.name} (${t.term_code}) — Status: ${t.is_active ? 'Active' : 'Inactive'}`"
               >
-                {{ t.name }} ({{ t.term_code }})
-              </span>
-              <span v-if="!data.terms || data.terms.length === 0" class="text-xs text-slate-400">No terms configured</span>
+                <span class="term-dot" :class="t.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                <span class="font-semibold">{{ t.name }}</span>
+                <span class="font-mono text-[10px] opacity-75">({{ t.term_code }})</span>
+                <span
+                  class="term-status-pill"
+                  :class="t.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'"
+                >
+                  {{ t.is_active ? 'ACTIVE' : 'INACTIVE' }}
+                </span>
+                <i class="pi pi-pencil text-[10px] text-slate-400 group-hover:text-emerald-700 ml-0.5"></i>
+              </button>
+              <span v-if="!data.terms || data.terms.length === 0" class="text-xs text-slate-400 italic">No terms configured</span>
+              <button
+                type="button"
+                class="term-add-chip-btn"
+                @click="openAddTermModal(data)"
+                title="Add examination term to this session"
+              >
+                <i class="pi pi-plus text-[10px]"></i>
+                <span>Add Term</span>
+              </button>
             </div>
           </template>
         </Column>
-        <Column field="status" header="Status" style="width: 120px">
+        <Column field="status" header="Status" style="width: 150px">
           <template #body="{ data }">
-            <StatusBadge :status="data.status" showDot />
+            <div class="flex items-center gap-1.5">
+              <StatusBadge :status="data.status" showDot />
+              <button
+                type="button"
+                class="session-status-edit-btn"
+                title="Change Session Status & Configuration"
+                @click="openEditSessionModal(data)"
+              >
+                <i class="pi pi-pencil text-xs"></i>
+              </button>
+            </div>
           </template>
         </Column>
-        <Column header="Actions" style="width: 130px">
+        <Column header="Actions" style="width: 170px">
           <template #body="{ data }">
-            <Button
-              label="Add Term"
-              icon="pi pi-plus"
-              size="small"
-              text
-              severity="secondary"
-              @click="openAddTermModal(data)"
-            />
+            <div class="flex items-center gap-1">
+              <Button
+                label="Edit"
+                icon="pi pi-pencil"
+                size="small"
+                text
+                severity="info"
+                class="font-semibold"
+                @click="openEditSessionModal(data)"
+              />
+              <Button
+                label="Add Term"
+                icon="pi pi-plus"
+                size="small"
+                text
+                severity="secondary"
+                class="font-semibold"
+                @click="openAddTermModal(data)"
+              />
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -777,28 +953,417 @@ onMounted(() => {
       </form>
     </Dialog>
 
-    <!-- Create Term Dialog -->
-    <Dialog v-model:visible="termDialogVisible" modal :header="`Add Term to ${selectedSessionForTerm?.name}`" :style="{ width: '460px' }">
-      <form @submit.prevent="handleCreateTerm" class="flex flex-col gap-4 pt-2">
-        <FormField id="term_name" label="Term Title" required>
-          <InputText id="term_name" v-model="termForm.name" placeholder="e.g. Mid-Term Examination" class="w-full" required />
-        </FormField>
-        <FormField id="term_code" label="Term Code" required>
-          <InputText id="term_code" v-model="termForm.term_code" placeholder="e.g. TERM-1" class="w-full font-mono" required />
+    <!-- Edit Academic Session Dialog -->
+    <Dialog
+      v-model:visible="editSessionDialogVisible"
+      modal
+      :style="{ width: '560px', maxWidth: '96vw' }"
+      class="session-edit-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-emerald-100 text-emerald-800">
+            <i class="pi pi-file-edit"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Academic Session</h2>
+              <span class="badge-institutional">ID #{{ editingSession?.id }}</span>
+            </div>
+            <p class="modal-subtitle">Modify session timeframe, lifecycle status, or active session designation</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateSession" class="flex flex-col gap-4 pt-1">
+        <!-- Session Name with Lead Icon -->
+        <FormField id="edit_session_name" label="Session Title / Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon"></i>
+            <input
+              id="edit_session_name"
+              v-model="editSessionForm.name"
+              type="text"
+              placeholder="e.g. Session 2026-2027"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
         </FormField>
 
-        <div class="grid grid-cols-2 gap-3">
-          <FormField id="term_start" label="Start Date" required>
-            <InputText id="term_start" v-model="termForm.start_date" type="date" class="w-full font-mono" required />
+        <!-- Session Status Dropdown -->
+        <FormField id="edit_session_status" label="Operational Lifecycle Status" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-shield field-icon text-indigo-500"></i>
+            <select
+              id="edit_session_status"
+              v-model="editSessionForm.status"
+              class="clean-input font-semibold"
+              required
+            >
+              <option value="PLANNING">PLANNING — Preparation & Setup Phase</option>
+              <option value="ACTIVE">ACTIVE — Live Academic Operations</option>
+              <option value="CONCLUDED">CONCLUDED — Academic Year Completed</option>
+              <option value="ARCHIVED">ARCHIVED — Historical Records (Read-Only)</option>
+            </select>
+          </div>
+        </FormField>
+
+        <!-- Date Range Grid with Clean Lead Icons -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="edit_start_date" label="Session Start Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-plus field-icon text-emerald-600"></i>
+              <input
+                id="edit_start_date"
+                v-model="editSessionForm.start_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
           </FormField>
-          <FormField id="term_end" label="End Date" required>
-            <InputText id="term_end" v-model="termForm.end_date" type="date" class="w-full font-mono" required />
+
+          <FormField id="edit_end_date" label="Session End Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-times field-icon text-amber-600"></i>
+              <input
+                id="edit_end_date"
+                v-model="editSessionForm.end_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
           </FormField>
         </div>
 
-        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="termDialogVisible = false" />
-          <Button type="submit" label="Save Term" icon="pi pi-check" :loading="termSubmitting" class="brand-gradient-bg border-none" />
+        <!-- Interactive Configuration Feature Card for is_current -->
+        <label class="feature-toggle-card" :class="{ selected: editSessionForm.is_current }">
+          <div class="flex items-start gap-3">
+            <input
+              type="checkbox"
+              v-model="editSessionForm.is_current"
+              class="custom-toggle-checkbox"
+            />
+            <div class="flex flex-col gap-0.5">
+              <span class="toggle-card-title">Set as Current Active Session</span>
+              <span class="toggle-card-desc">
+                Designate as the live institutional session for daily attendance, teacher allocations, grade entry, and fees.
+              </span>
+            </div>
+          </div>
+        </label>
+
+        <!-- Configured Terms of This Session -->
+        <div v-if="editingSession?.terms && editingSession.terms.length > 0" class="pt-2 border-t border-slate-100">
+          <div class="flex justify-between items-center mb-2">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Terms in this Session ({{ editingSession.terms.length }})
+            </span>
+            <button
+              type="button"
+              class="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+              @click="editSessionDialogVisible = false; openAddTermModal(editingSession)"
+            >
+              <i class="pi pi-plus text-[10px]"></i> Add Term
+            </button>
+          </div>
+          <div class="flex flex-col gap-1.5 max-h-36 overflow-y-auto pr-1">
+            <div
+              v-for="t in editingSession.terms"
+              :key="t.id"
+              class="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"
+            >
+              <div class="flex items-center gap-2">
+                <span class="term-dot" :class="t.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                <span class="font-bold text-slate-800">{{ t.name }}</span>
+                <span class="font-mono text-slate-500 text-[11px]">({{ t.term_code }})</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors"
+                  :class="t.is_active ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
+                  title="Click to toggle status"
+                  @click="quickToggleTermStatus(t, editingSession)"
+                >
+                  {{ t.is_active ? 'ACTIVE' : 'INACTIVE' }}
+                </button>
+                <button
+                  type="button"
+                  class="text-slate-400 hover:text-emerald-600 p-1"
+                  title="Edit Term Details"
+                  @click="editSessionDialogVisible = false; openEditTermModal(t, editingSession)"
+                >
+                  <i class="pi pi-pencil text-xs"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Clean Modal Action Footer -->
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <Button
+            type="button"
+            label="Cancel"
+            severity="secondary"
+            outlined
+            @click="editSessionDialogVisible = false"
+          />
+          <Button
+            type="submit"
+            label="Save Session Changes"
+            icon="pi pi-check"
+            :loading="editSessionSubmitting"
+            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+          />
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Create Term Dialog -->
+    <Dialog
+      v-model:visible="termDialogVisible"
+      modal
+      :style="{ width: '500px', maxWidth: '96vw' }"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon">
+            <i class="pi pi-plus-circle"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Add Academic Term</h2>
+              <span class="badge-institutional">{{ selectedSessionForTerm?.name }}</span>
+            </div>
+            <p class="modal-subtitle">Configure term timeframe within this session</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleCreateTerm" class="flex flex-col gap-4 pt-1">
+        <FormField id="term_name" label="Term Title / Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon"></i>
+            <input
+              id="term_name"
+              v-model="termForm.name"
+              type="text"
+              placeholder="e.g. 1st Term Examination / Mid-Term"
+              class="clean-input"
+              required
+            />
+          </div>
+        </FormField>
+
+        <FormField id="term_code" label="Term Code / Identifier" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-tag field-icon"></i>
+            <input
+              id="term_code"
+              v-model="termForm.term_code"
+              type="text"
+              placeholder="e.g. TERM_1"
+              class="clean-input font-mono"
+              required
+            />
+          </div>
+        </FormField>
+
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="term_start" label="Term Start Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-plus field-icon text-emerald-600"></i>
+              <input
+                id="term_start"
+                v-model="termForm.start_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+          </FormField>
+
+          <FormField id="term_end" label="Term End Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-times field-icon text-amber-600"></i>
+              <input
+                id="term_end"
+                v-model="termForm.end_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+          </FormField>
+        </div>
+
+        <label class="feature-toggle-card" :class="{ selected: termForm.is_active }">
+          <div class="flex items-start gap-3">
+            <input
+              type="checkbox"
+              v-model="termForm.is_active"
+              class="custom-toggle-checkbox"
+            />
+            <div class="flex flex-col gap-0.5">
+              <span class="toggle-card-title">Set as Active Term</span>
+              <span class="toggle-card-desc">
+                Immediately enable this term for recording marks, timetable schedules, and exams.
+              </span>
+            </div>
+          </div>
+        </label>
+
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <Button
+            type="button"
+            label="Cancel"
+            severity="secondary"
+            outlined
+            @click="termDialogVisible = false"
+          />
+          <Button
+            type="submit"
+            label="Register Term"
+            icon="pi pi-check"
+            :loading="termSubmitting"
+            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+          />
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Edit Term Dialog -->
+    <Dialog
+      v-model:visible="editTermDialogVisible"
+      modal
+      :style="{ width: '520px', maxWidth: '96vw' }"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon">
+            <i class="pi pi-pencil"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Academic Term</h2>
+              <span class="badge-institutional">{{ selectedSessionForTerm?.name || 'Term' }}</span>
+            </div>
+            <p class="modal-subtitle">Modify term schedule boundaries, code identifier, or operational status</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateTerm" class="flex flex-col gap-4 pt-1">
+        <FormField id="edit_term_name" label="Term Title / Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon"></i>
+            <input
+              id="edit_term_name"
+              v-model="editTermForm.name"
+              type="text"
+              placeholder="e.g. 1st Term Examination"
+              class="clean-input"
+              required
+            />
+          </div>
+        </FormField>
+
+        <FormField id="edit_term_code" label="Term Code / Identifier" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-tag field-icon"></i>
+            <input
+              id="edit_term_code"
+              v-model="editTermForm.term_code"
+              type="text"
+              placeholder="e.g. TERM_1"
+              class="clean-input font-mono"
+              required
+            />
+          </div>
+        </FormField>
+
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="edit_term_start" label="Term Start Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-plus field-icon text-emerald-600"></i>
+              <input
+                id="edit_term_start"
+                v-model="editTermForm.start_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+          </FormField>
+
+          <FormField id="edit_term_end" label="Term End Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-times field-icon text-amber-600"></i>
+              <input
+                id="edit_term_end"
+                v-model="editTermForm.end_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+          </FormField>
+        </div>
+
+        <!-- Term Status Toggle Card -->
+        <label class="feature-toggle-card" :class="{ selected: editTermForm.is_active }">
+          <div class="flex items-start gap-3">
+            <input
+              type="checkbox"
+              v-model="editTermForm.is_active"
+              class="custom-toggle-checkbox"
+            />
+            <div class="flex flex-col gap-0.5">
+              <span class="toggle-card-title">
+                {{ editTermForm.is_active ? 'Active Term (Operational)' : 'Inactive Term (Archived / Closed)' }}
+              </span>
+              <span class="toggle-card-desc">
+                {{ editTermForm.is_active
+                  ? 'Term is actively open for marks entry, exam scheduling, attendance calculations, and student assessment.'
+                  : 'Term is marked inactive; exam schedules and marks calculations are locked for historical preservation.'
+                }}
+              </span>
+            </div>
+          </div>
+        </label>
+
+        <!-- Actions Footer -->
+        <div class="flex items-center justify-between mt-3 pt-3.5 border-t border-slate-200">
+          <Button
+            type="button"
+            label="Delete Term"
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            size="small"
+            class="text-rose-600 hover:text-rose-700"
+            @click="handleDeleteTerm"
+          />
+          <div class="flex gap-2">
+            <Button
+              type="button"
+              label="Cancel"
+              severity="secondary"
+              outlined
+              @click="editTermDialogVisible = false"
+            />
+            <Button
+              type="submit"
+              label="Update Academic Term"
+              icon="pi pi-check"
+              :loading="editTermSubmitting"
+              class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
         </div>
       </form>
     </Dialog>
@@ -1181,5 +1746,102 @@ onMounted(() => {
   font-size: 0.75rem;
   color: #64748b;
   line-height: 1.35;
+}
+
+/* Interactive Term Chips & Session Status Edit */
+.term-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.term-chip-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.term-chip-btn.is-active {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.term-chip-btn.is-active:hover {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+}
+
+.term-chip-btn.is-inactive {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #64748b;
+  opacity: 0.85;
+}
+
+.term-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.term-status-pill {
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.08rem 0.35rem;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+
+.term-add-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  border: 1px dashed #94a3b8;
+  background: transparent;
+  color: #475569;
+  font-size: 0.725rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.term-add-chip-btn:hover {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #10b981;
+  border-style: solid;
+}
+
+.session-status-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.session-status-edit-btn:hover {
+  color: #059669;
+  background: #ecfdf5;
 }
 </style>
