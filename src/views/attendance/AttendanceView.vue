@@ -391,39 +391,39 @@ onMounted(async () => {
     <!-- 1. Take Attendance Roll-Call Panel -->
     <div v-if="activeTab === 'take'" class="table-card glass-panel flex flex-col gap-5">
       <!-- Selector Controls -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-        <FormField id="roll_class" label="Class / Grade Level">
-          <select id="roll_class" v-model="selectedClassId" class="custom-select w-full">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-x-6 xl:gap-x-8 gap-y-5 p-5 sm:p-6 bg-slate-50/90 rounded-2xl border border-slate-200/90 shadow-sm text-xs">
+        <FormField id="roll_class" label="Class / Grade Level" class="min-w-0">
+          <select id="roll_class" v-model="selectedClassId" class="custom-select w-full h-[42px]">
             <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </FormField>
 
-        <FormField id="roll_section" label="Section / Arm">
-          <select id="roll_section" v-model="selectedSectionId" class="custom-select w-full">
+        <FormField id="roll_section" label="Section / Arm" class="min-w-0">
+          <select id="roll_section" v-model="selectedSectionId" class="custom-select w-full h-[42px]">
             <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
         </FormField>
 
-        <FormField id="roll_date" label="Attendance Date">
-          <InputText id="roll_date" v-model="sessionDate" type="date" class="w-full font-mono p-inputtext-sm" @change="loadRoster" />
+        <FormField id="roll_date" label="Attendance Date" class="min-w-0">
+          <InputText id="roll_date" v-model="sessionDate" type="date" class="w-full font-mono text-xs sm:text-sm h-[42px] px-3.5 rounded-lg border border-slate-300 bg-white" @change="loadRoster" />
         </FormField>
 
-        <FormField id="roll_type" label="Attendance Mode">
-          <select id="roll_type" v-model="attendanceType" class="custom-select w-full" @change="loadRoster">
+        <FormField id="roll_type" label="Attendance Mode" class="min-w-0">
+          <select id="roll_type" v-model="attendanceType" class="custom-select w-full h-[42px]" @change="loadRoster">
             <option value="DAILY_HOMEROOM">Daily Homeroom</option>
             <option value="PERIOD_WISE">Period-Wise Subject</option>
           </select>
         </FormField>
 
-        <FormField v-if="attendanceType === 'PERIOD_WISE'" id="roll_period" label="Class Period">
-          <select id="roll_period" v-model="selectedPeriodId" class="custom-select w-full" @change="loadRoster">
+        <FormField v-if="attendanceType === 'PERIOD_WISE'" id="roll_period" label="Class Period" class="min-w-0">
+          <select id="roll_period" v-model="selectedPeriodId" class="custom-select w-full h-[42px]" @change="loadRoster">
             <option value="" disabled>Select Period</option>
             <option v-for="p in periodsList" :key="p.id" :value="p.id">{{ p.name }} ({{ p.start_time.substring(0, 5) }})</option>
           </select>
         </FormField>
 
-        <div v-else class="flex flex-col justify-end">
-          <Button label="Reload Roster" icon="pi pi-sync" severity="secondary" outlined size="small" :loading="rosterLoading" @click="loadRoster" />
+        <div v-else class="flex flex-col justify-end min-w-0">
+          <Button label="Reload Roster" icon="pi pi-sync" severity="secondary" outlined size="small" class="h-[42px] w-full text-xs font-semibold rounded-lg" :loading="rosterLoading" @click="loadRoster" />
         </div>
       </div>
 
@@ -574,9 +574,9 @@ onMounted(async () => {
         @refresh="() => fetchSessions(sessionsPage)"
       >
         <template #toolbar-start>
-          <div class="flex items-center gap-2">
-            <InputText v-model="sessionFilterDate" type="date" class="p-inputtext-sm font-mono" @change="fetchSessions(1)" />
-            <Button icon="pi pi-filter" label="Filter" size="small" severity="secondary" outlined @click="fetchSessions(1)" />
+          <div class="flex items-center gap-3">
+            <InputText v-model="sessionFilterDate" type="date" class="p-inputtext-sm font-mono h-10 px-3 border border-slate-300 rounded-lg text-xs" @change="fetchSessions(1)" />
+            <Button icon="pi pi-filter" label="Filter" size="small" severity="secondary" outlined class="h-10 px-3.5 rounded-lg text-xs font-semibold" @click="fetchSessions(1)" />
           </div>
         </template>
 
@@ -633,18 +633,18 @@ onMounted(async () => {
     <!-- 3. Summaries & Analytics Panel -->
     <div v-if="activeTab === 'reports'" class="flex flex-col gap-5">
       <div class="table-card glass-panel">
-        <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+        <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div>
             <h3 class="text-base font-bold text-slate-800">Section Attendance Analytics</h3>
             <p class="text-xs text-slate-500">Aggregate presence percentage and absence trends</p>
           </div>
-          <div class="flex items-center gap-2 flex-wrap">
-            <select v-model="summarySectionId" class="custom-select p-inputtext-sm">
+          <div class="flex items-center gap-3.5 flex-wrap">
+            <select v-model="summarySectionId" class="custom-select h-10 text-xs px-3">
               <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
-            <InputText v-model="summaryStartDate" type="date" class="p-inputtext-sm font-mono" />
-            <InputText v-model="summaryEndDate" type="date" class="p-inputtext-sm font-mono" />
-            <Button label="Calculate" icon="pi pi-chart-pie" size="small" class="brand-gradient-bg border-none" :loading="summaryLoading" @click="fetchSummary" />
+            <InputText v-model="summaryStartDate" type="date" class="p-inputtext-sm font-mono h-10 px-3 text-xs border border-slate-300 rounded-lg" />
+            <InputText v-model="summaryEndDate" type="date" class="p-inputtext-sm font-mono h-10 px-3 text-xs border border-slate-300 rounded-lg" />
+            <Button label="Calculate" icon="pi pi-chart-pie" size="small" class="brand-gradient-bg border-none h-10 px-4 font-semibold rounded-lg" :loading="summaryLoading" @click="fetchSummary" />
           </div>
         </div>
 
@@ -884,6 +884,7 @@ onMounted(async () => {
 }
 
 .custom-select {
+  height: 42px;
   padding: 0.5rem 0.85rem;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -892,10 +893,12 @@ onMounted(async () => {
   font-size: 0.875rem;
   font-weight: 500;
   outline: none;
+  transition: all 0.2s ease;
 }
 
 .custom-select:focus {
   border-color: #059669;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
 }
 
 .status-btn-group {
