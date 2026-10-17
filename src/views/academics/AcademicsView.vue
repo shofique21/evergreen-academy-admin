@@ -600,42 +600,32 @@ onMounted(() => {
             </div>
           </template>
         </Column>
-        <Column field="status" header="Status" style="width: 150px">
+        <Column field="status" header="Status" style="width: 140px">
           <template #body="{ data }">
-            <div class="flex items-center gap-1.5">
-              <StatusBadge :status="data.status" showDot />
-              <button
-                type="button"
-                class="session-status-edit-btn"
-                title="Change Session Status & Configuration"
-                @click="openEditSessionModal(data)"
-              >
-                <i class="pi pi-pencil text-xs"></i>
-              </button>
-            </div>
+            <StatusBadge :status="data.status" showDot />
           </template>
         </Column>
-        <Column header="Actions" style="width: 170px">
+        <Column header="Actions" style="width: 180px">
           <template #body="{ data }">
-            <div class="flex items-center gap-1">
-              <Button
-                label="Edit"
-                icon="pi pi-pencil"
-                size="small"
-                text
-                severity="info"
-                class="font-semibold"
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="clean-session-edit-btn"
                 @click="openEditSessionModal(data)"
-              />
-              <Button
-                label="Add Term"
-                icon="pi pi-plus"
-                size="small"
-                text
-                severity="secondary"
-                class="font-semibold"
+                title="Edit Academic Session & Status"
+              >
+                <i class="pi pi-pencil text-xs"></i>
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                class="clean-session-term-btn"
                 @click="openAddTermModal(data)"
-              />
+                title="Add examination term to this session"
+              >
+                <i class="pi pi-plus text-xs"></i>
+                <span>Term</span>
+              </button>
             </div>
           </template>
         </Column>
@@ -1092,11 +1082,12 @@ onMounted(() => {
                 </button>
                 <button
                   type="button"
-                  class="text-slate-400 hover:text-emerald-600 p-1"
+                  class="mini-term-edit-btn"
                   title="Edit Term Details"
                   @click="editSessionDialogVisible = false; openEditTermModal(t, editingSession)"
                 >
-                  <i class="pi pi-pencil text-xs"></i>
+                  <i class="pi pi-pencil text-[11px]"></i>
+                  <span>Edit</span>
                 </button>
               </div>
             </div>
@@ -1105,20 +1096,22 @@ onMounted(() => {
 
         <!-- Clean Modal Action Footer -->
         <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
-          <Button
+          <button
             type="button"
-            label="Cancel"
-            severity="secondary"
-            outlined
+            class="modal-btn-cancel"
             @click="editSessionDialogVisible = false"
-          />
-          <Button
+          >
+            Cancel
+          </button>
+          <button
             type="submit"
-            label="Save Session Changes"
-            icon="pi pi-check"
-            :loading="editSessionSubmitting"
-            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
-          />
+            :disabled="editSessionSubmitting"
+            class="modal-btn-primary"
+          >
+            <i v-if="editSessionSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+            <i v-else class="pi pi-check text-xs"></i>
+            <span>{{ editSessionSubmitting ? 'Saving Changes...' : 'Update Academic Session' }}</span>
+          </button>
         </div>
       </form>
     </Dialog>
@@ -1843,5 +1836,118 @@ onMounted(() => {
 .session-status-edit-btn:hover {
   color: #059669;
   background: #ecfdf5;
+}
+
+/* Clean Session Edit & Action Buttons */
+.clean-session-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.clean-session-edit-btn:hover {
+  background: #059669;
+  color: #ffffff;
+  border-color: #059669;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.22);
+  transform: translateY(-1px);
+}
+
+.clean-session-term-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.clean-session-term-btn:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-color: #cbd5e1;
+}
+
+.mini-term-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.675rem;
+  font-weight: 600;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mini-term-edit-btn:hover {
+  background: #059669;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+.modal-btn-cancel {
+  padding: 0.55rem 1.15rem;
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-btn-cancel:hover {
+  background: #f8fafc;
+  color: #334155;
+  border-color: #94a3b8;
+}
+
+.modal-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1.35rem;
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.2);
+  transition: all 0.2s ease;
+}
+
+.modal-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+  transform: translateY(-1px);
+}
+
+.modal-btn-primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 </style>
