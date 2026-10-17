@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import PageHeader from '@/components/common/PageHeader.vue'
@@ -103,6 +103,24 @@ const enrollForm = ref({
   section_id: '' as any,
   roll_number: '' as any,
   opening_balance_arrears: 0,
+})
+
+const sectionRollInfo = ref<{
+  section_id: number
+  section_name: string
+  class_name: string
+  capacity: number
+  enrolled_count: number
+  available_seats: number
+  taken_rolls: number[]
+  next_roll: number
+  is_full: boolean
+} | null>(null)
+const loadingRollInfo = ref(false)
+
+const isRollTaken = computed(() => {
+  if (!sectionRollInfo.value?.taken_rolls?.length || !enrollForm.value.roll_number) return false
+  return sectionRollInfo.value.taken_rolls.includes(Number(enrollForm.value.roll_number))
 })
 
 // Student Details Dialog
@@ -234,18 +252,65 @@ async function handleReviewApplication() {
   }
 }
 
+async function fetchSectionRollInfo(sectionId: number | string) {
+  if (!sectionId) {
+    sectionRollInfo.value = null
+    return
+  }
+  try {
+    loadingRollInfo.value = true
+    const yearId = selectedApp.value?.academic_year_id || currentSessionId.value
+    const { data } = await api.get(`/api/v1/admissions/sections/${sectionId}/roll-info`, {
+      params: yearId ? { academic_year_id: yearId } : {},
+    })
+    sectionRollInfo.value = data.data
+
+    // If roll_number is empty or already taken in this section, prefill with next available roll
+    if (
+      !enrollForm.value.roll_number ||
+      sectionRollInfo.value?.taken_rolls?.includes(Number(enrollForm.value.roll_number))
+    ) {
+      enrollForm.value.roll_number = sectionRollInfo.value?.next_roll || 1
+    }
+  } catch (err: unknown) {
+    console.error('Failed to load section roll info:', err)
+  } finally {
+    loadingRollInfo.value = false
+  }
+}
+
+function onSectionChange() {
+  if (enrollForm.value.section_id) {
+    fetchSectionRollInfo(enrollForm.value.section_id)
+  }
+}
+
 function openEnrollModal(app: AdmissionApplication) {
   selectedApp.value = app
   const cls = classesList.value.find((c: any) => c.id === app.class_id)
   sectionsList.value = cls?.sections || []
-  enrollForm.value.section_id = sectionsList.value[0]?.id || ''
+  const initialSectionId = sectionsList.value[0]?.id || ''
+  enrollForm.value.section_id = initialSectionId
   enrollForm.value.roll_number = ''
+  enrollForm.value.opening_balance_arrears = 0
+  sectionRollInfo.value = null
   enrollDialogVisible.value = true
+  if (initialSectionId) {
+    fetchSectionRollInfo(initialSectionId)
+  }
 }
 
 async function handleEnrollApplication() {
   if (!selectedApp.value || !enrollForm.value.section_id || !enrollForm.value.roll_number) {
     notifyWarn('Validation Required', 'Please select section and assign roll number.')
+    return
+  }
+
+  if (isRollTaken.value) {
+    notifyWarn(
+      'Roll Number Conflict',
+      `Roll number #${enrollForm.value.roll_number} is already taken in section ${sectionRollInfo.value?.section_name}. Please choose another roll number.`
+    )
     return
   }
 
@@ -258,9 +323,15 @@ async function handleEnrollApplication() {
     notifySuccess('Student Enrolled', data.message || 'Application enrolled into official student registry.')
     enrollDialogVisible.value = false
     await fetchApplications()
-  } catch (err: unknown) {
-    const errObj = err as { message?: string }
-    notifyError('Enrollment Failed', errObj.message || 'Could not complete enrollment.')
+  } catch (err: any) {
+    const errorMsg =
+      err.response?.data?.errors?.roll_number?.[0] ||
+      err.response?.data?.errors?.section_id?.[0] ||
+      err.response?.data?.errors?.application?.[0] ||
+      err.response?.data?.message ||
+      err.message ||
+      'Could not complete enrollment.'
+    notifyError('Enrollment Failed', errorMsg)
   } finally {
     enrolling.value = false
   }
@@ -1327,30 +1398,94 @@ onMounted(async () => {
     </Dialog>
 
     <!-- Enroll Approved Application Modal Dialog -->
-    <Dialog v-model:visible="enrollDialogVisible" modal header="Enroll Student into Official SIS Registry" :style="{ width: '480px' }">
-      <div v-if="selectedApp" class="flex flex-col gap-3.5 pt-2">
-        <div class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm flex flex-col gap-1.5 shadow-sm">
-          <div class="flex justify-between items-center pb-1 border-b border-emerald-200">
-            <span class="text-xs uppercase font-bold text-emerald-700">Enrolling Student</span>
-            <span class="font-bold text-slate-900">{{ selectedApp.first_name }} {{ selectedApp.last_name }}</span>
+    <Dialog
+      v-model:visible="enrollDialogVisible"
+      modal
+      :style="{ width: '520px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); color: #047857; border-color: #a7f3d0;">
+            <i class="pi pi-user-plus text-lg"></i>
           </div>
-          <div class="flex justify-between items-center">
-            <span class="text-xs text-emerald-800">Target Grade:</span>
-            <span class="font-bold text-emerald-900">{{ selectedApp.classLevel?.name }}</span>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Official Student SIS Enrollment</h2>
+              <span class="badge-intake">Approved</span>
+            </div>
+            <p class="modal-subtitle">Assign classroom section & student roll number</p>
+          </div>
+        </div>
+      </template>
+
+      <div v-if="selectedApp" class="flex flex-col gap-4 pt-1">
+        <!-- Student Quick Summary Card -->
+        <div class="p-3.5 bg-gradient-to-br from-emerald-50 via-teal-50 to-slate-50 border border-emerald-200/80 rounded-xl text-sm flex flex-col gap-2 shadow-xs">
+          <div class="flex justify-between items-center pb-2 border-b border-emerald-200/60">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="text-xs uppercase font-bold tracking-wider text-emerald-800">Enrolling Student</span>
+            </div>
+            <span class="font-bold text-slate-900 text-base">{{ selectedApp.first_name }} {{ selectedApp.last_name }}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span class="text-emerald-700 font-medium">Application Ref:</span>
+              <span class="font-mono font-semibold text-slate-800 ml-1">{{ selectedApp.application_no }}</span>
+            </div>
+            <div>
+              <span class="text-emerald-700 font-medium">Target Grade:</span>
+              <span class="font-bold text-emerald-950 ml-1">{{ selectedApp.classLevel?.name }}</span>
+            </div>
+            <div>
+              <span class="text-emerald-700 font-medium">Session:</span>
+              <span class="font-medium text-slate-800 ml-1">{{ selectedApp.academicYear?.name || 'Current Session' }}</span>
+            </div>
+            <div>
+              <span class="text-emerald-700 font-medium">Guardian Phone:</span>
+              <span class="font-mono text-slate-800 ml-1">{{ selectedApp.guardian_phone }}</span>
+            </div>
           </div>
         </div>
 
-        <FormField id="enroll_sec" label="Assign Section / Arm" required>
+        <!-- Section / Arm Selection -->
+        <FormField id="enroll_sec" label="Target Section / Classroom Arm" required>
           <div class="clean-field-wrap">
             <i class="pi pi-th-large field-icon"></i>
-            <select id="enroll_sec" v-model="enrollForm.section_id" class="clean-select" required>
+            <select
+              id="enroll_sec"
+              v-model="enrollForm.section_id"
+              class="clean-select"
+              required
+              @change="onSectionChange"
+            >
               <option value="" disabled>Select Section</option>
-              <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+              <option v-for="s in sectionsList" :key="s.id" :value="s.id">
+                {{ s.name }} (Capacity: {{ s.capacity || 40 }})
+              </option>
             </select>
+          </div>
+
+          <!-- Section Capacity & Occupancy Badge -->
+          <div v-if="loadingRollInfo" class="text-xs text-slate-500 flex items-center gap-1.5 mt-1.5">
+            <i class="pi pi-spin pi-spinner text-emerald-600"></i>
+            Checking section roll numbers...
+          </div>
+          <div v-else-if="sectionRollInfo" class="flex flex-wrap items-center justify-between gap-1.5 mt-1.5 text-xs">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-medium border border-slate-200">
+              <i class="pi pi-users text-slate-500 text-[11px]"></i>
+              Seats: <strong class="text-slate-900">{{ sectionRollInfo.enrolled_count }} / {{ sectionRollInfo.capacity }}</strong>
+              <span class="text-emerald-700 font-semibold">({{ sectionRollInfo.available_seats }} seats free)</span>
+            </span>
+            <span v-if="sectionRollInfo.is_full" class="text-rose-700 font-bold flex items-center gap-1 px-2 py-0.5 bg-rose-50 rounded border border-rose-200">
+              <i class="pi pi-exclamation-circle text-rose-600"></i> Section Full
+            </span>
           </div>
         </FormField>
 
-        <FormField id="enroll_roll" label="Assign Roll Number" required>
+        <!-- Roll Number Assignment -->
+        <FormField id="enroll_roll" label="Assign Student Roll Number" required>
           <div class="clean-field-wrap">
             <i class="pi pi-hashtag field-icon"></i>
             <input
@@ -1361,14 +1496,76 @@ onMounted(async () => {
               max="500"
               required
               class="clean-input font-mono font-bold"
+              :class="isRollTaken ? 'border-rose-400 bg-rose-50/40 text-rose-900' : 'text-slate-900'"
               placeholder="e.g. 1"
+            />
+            <button
+              v-if="sectionRollInfo?.next_roll && enrollForm.roll_number !== sectionRollInfo.next_roll"
+              type="button"
+              class="px-2.5 py-1 mr-2 text-xs font-semibold rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors cursor-pointer border border-emerald-300 shrink-0"
+              title="Click to auto-assign next free roll"
+              @click="enrollForm.roll_number = sectionRollInfo.next_roll"
+            >
+              Use Next: #{{ sectionRollInfo.next_roll }}
+            </button>
+          </div>
+
+          <!-- In-line Roll Conflict Alert -->
+          <div v-if="isRollTaken" class="flex items-start gap-2 p-2.5 mt-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs">
+            <i class="pi pi-exclamation-triangle text-rose-600 mt-0.5 text-sm shrink-0"></i>
+            <div class="flex-1">
+              <span class="font-bold">Roll #{{ enrollForm.roll_number }} is already taken</span> in section {{ sectionRollInfo?.section_name }}!
+              Please choose another roll number.
+              <button
+                type="button"
+                class="ml-1 font-bold underline text-rose-900 hover:text-rose-950 cursor-pointer"
+                @click="enrollForm.roll_number = sectionRollInfo?.next_roll"
+              >
+                Click to assign Roll #{{ sectionRollInfo?.next_roll }}
+              </button>
+            </div>
+          </div>
+          <!-- Roll Status Info -->
+          <div v-else-if="sectionRollInfo" class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+            <span class="font-medium text-slate-500">Next Recommended Roll:</span>
+            <span class="font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              #{{ sectionRollInfo.next_roll }}
+            </span>
+            <span v-if="sectionRollInfo.taken_rolls?.length" class="text-slate-400 ml-1">
+              (Occupied in {{ sectionRollInfo.section_name }}: {{ sectionRollInfo.taken_rolls.map((r: number) => '#' + r).join(', ') }})
+            </span>
+            <span v-else class="text-slate-400 ml-1">
+              (Section is empty — Roll #1 is ready)
+            </span>
+          </div>
+        </FormField>
+
+        <!-- Opening Arrears Balance (Optional) -->
+        <FormField id="enroll_arrears" label="Opening Balance / Prior Arrears (৳) (Optional)">
+          <div class="clean-field-wrap">
+            <i class="pi pi-wallet field-icon"></i>
+            <input
+              id="enroll_arrears"
+              v-model.number="enrollForm.opening_balance_arrears"
+              type="number"
+              min="0"
+              step="0.01"
+              class="clean-input font-mono"
+              placeholder="0.00"
             />
           </div>
         </FormField>
 
-        <div class="flex justify-end gap-2.5 mt-2 pt-3 border-t border-slate-200">
+        <div class="flex items-center justify-end gap-2.5 mt-2 pt-3 border-t border-slate-200">
           <Button label="Cancel" severity="secondary" outlined @click="enrollDialogVisible = false" />
-          <Button label="Complete Enrollment" icon="pi pi-user-plus" :loading="enrolling" class="brand-gradient-bg border-none px-5" @click="handleEnrollApplication" />
+          <Button
+            label="Complete Enrollment"
+            icon="pi pi-user-plus"
+            :loading="enrolling"
+            :disabled="isRollTaken || !enrollForm.section_id || !enrollForm.roll_number"
+            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow"
+            @click="handleEnrollApplication"
+          />
         </div>
       </div>
     </Dialog>
