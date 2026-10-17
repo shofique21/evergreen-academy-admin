@@ -280,13 +280,13 @@ async function loadRoster() {
 
       // Load existing session details with records
       const detail = await api.get(`/api/v1/attendance/sessions/${existingSession.id}`)
-      const attendances: StudentAttendance[] = detail.data.data.studentAttendances || []
+      const attendances: StudentAttendance[] = detail.data.data?.studentAttendances || detail.data.data?.student_attendances || []
 
-      roster.value = attendances.map((att) => ({
+      roster.value = attendances.map((att: any) => ({
         student_id: att.student_id,
         student_uid: att.student?.student_uid || '',
-        name: att.student?.full_name || '',
-        roll_number: att.student?.currentEnrollment?.roll_number || 1,
+        name: att.student?.full_name || `${att.student?.first_name || ''} ${att.student?.last_name || ''}`.trim() || 'Student',
+        roll_number: att.student?.currentEnrollment?.roll_number || att.student?.current_enrollment?.roll_number || 1,
         status: att.status,
         check_in_time: resolveCheckInTime(att.check_in_time),
         remarks: att.remarks || '',
@@ -399,7 +399,20 @@ async function openViewSession(session: AttendanceSession) {
     detailLoading.value = true
     detailModalVisible.value = true
     const { data } = await api.get(`/api/v1/attendance/sessions/${session.id}`)
-    selectedSession.value = data.data
+    const sessionData = data.data
+    if (sessionData) {
+      const records = sessionData.studentAttendances || sessionData.student_attendances || []
+      sessionData.studentAttendances = records.map((att: any) => ({
+        ...att,
+        student: att.student ? {
+          ...att.student,
+          full_name: att.student.full_name || `${att.student.first_name || ''} ${att.student.last_name || ''}`.trim() || 'Student',
+          currentEnrollment: att.student.currentEnrollment || att.student.current_enrollment,
+        } : null,
+      }))
+      sessionData.student_attendances = sessionData.studentAttendances
+    }
+    selectedSession.value = sessionData
   } catch (err: unknown) {
     const errorObj = err as { message?: string }
     notifyError('Error', errorObj.message || 'Could not load session details.')
@@ -1346,28 +1359,48 @@ onMounted(async () => {
           <Tag :value="selectedSession.is_locked ? 'LOCKED' : 'OPEN'" :severity="selectedSession.is_locked ? 'danger' : 'success'" />
         </div>
 
-        <div class="border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+        <div class="border border-slate-200 rounded-xl overflow-hidden max-h-80 overflow-y-auto">
           <table class="w-full text-left text-xs">
             <thead class="bg-slate-100 text-slate-600 font-semibold sticky top-0">
               <tr>
-                <th class="p-2">Roll</th>
-                <th class="p-2">UID</th>
-                <th class="p-2">Student Name</th>
-                <th class="p-2">Status</th>
-                <th class="p-2">Correction Reason</th>
-                <th class="p-2 w-28 text-center">Action</th>
+                <th class="p-2.5">Roll</th>
+                <th class="p-2.5">UID</th>
+                <th class="p-2.5">Student Name</th>
+                <th class="p-2.5">Status</th>
+                <th class="p-2.5">Check-in</th>
+                <th class="p-2.5">Correction Reason</th>
+                <th class="p-2.5 w-24 text-center">Action</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-200">
-              <tr v-for="att in selectedSession.studentAttendances" :key="att.id" class="hover:bg-slate-50">
-                <td class="p-2 font-mono font-bold">{{ att.student?.currentEnrollment?.roll_number || '—' }}</td>
-                <td class="p-2 font-mono text-emerald-800 font-semibold">{{ att.student?.student_uid }}</td>
-                <td class="p-2 font-bold text-slate-800">{{ att.student?.full_name }}</td>
-                <td class="p-2">
+              <tr
+                v-for="att in (selectedSession.studentAttendances || selectedSession.student_attendances || [])"
+                :key="att.id"
+                class="hover:bg-slate-50 transition-colors"
+              >
+                <td class="p-2.5 font-mono font-bold text-slate-700">
+                  #{{ att.student?.currentEnrollment?.roll_number || att.student?.current_enrollment?.roll_number || '—' }}
+                </td>
+                <td class="p-2.5 font-mono text-emerald-800 font-semibold">
+                  {{ att.student?.student_uid || '—' }}
+                </td>
+                <td class="p-2.5 font-bold text-slate-800">
+                  {{ att.student?.full_name || `${att.student?.first_name || ''} ${att.student?.last_name || ''}`.trim() || 'Student' }}
+                </td>
+                <td class="p-2.5">
                   <StatusBadge :status="att.status" size="small" />
                 </td>
-                <td class="p-2 text-slate-500">{{ att.correction_reason || '—' }}</td>
-                <td class="p-2 text-center">
+                <td class="p-2.5 font-mono text-slate-600">
+                  {{ att.check_in_time || '—' }}
+                </td>
+                <td class="p-2.5 text-slate-500">
+                  <span v-if="att.correction_reason" class="text-amber-800 font-semibold inline-flex items-center gap-1">
+                    <i class="pi pi-pencil text-[10px]"></i>{{ att.correction_reason }}
+                  </span>
+                  <span v-else-if="att.remarks">{{ att.remarks }}</span>
+                  <span v-else class="text-slate-300">—</span>
+                </td>
+                <td class="p-2.5 text-center">
                   <Button
                     label="Correct"
                     icon="pi pi-pencil"
@@ -1376,6 +1409,12 @@ onMounted(async () => {
                     severity="warn"
                     @click="openCorrectionModal(att)"
                   />
+                </td>
+              </tr>
+              <tr v-if="!(selectedSession.studentAttendances || selectedSession.student_attendances)?.length">
+                <td colspan="7" class="p-6 text-center text-slate-400">
+                  <i class="pi pi-users text-xl block mb-1"></i>
+                  No student attendance records recorded for this session.
                 </td>
               </tr>
             </tbody>
