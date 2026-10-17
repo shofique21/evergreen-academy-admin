@@ -164,6 +164,20 @@ const subjectForm = ref({
   has_practical: false,
 })
 
+// Edit Subject Modal
+const editSubjectDialogVisible = ref(false)
+const editSubjectSubmitting = ref(false)
+const editingSubject = ref<any | null>(null)
+const editSubjectForm = ref({
+  class_id: '' as any,
+  name: '',
+  code: '',
+  type: 'COMPULSORY',
+  full_marks: 100,
+  pass_marks: 33,
+  has_practical: false,
+})
+
 // Room Modal
 const roomDialogVisible = ref(false)
 const roomSubmitting = ref(false)
@@ -469,6 +483,73 @@ async function handleCreateSubject() {
     notifyError('Subject Error', errorObj.message || 'Could not create subject.')
   } finally {
     subjectSubmitting.value = false
+  }
+}
+
+function openEditSubjectModal(subject: any) {
+  editingSubject.value = subject
+  editSubjectForm.value = {
+    class_id: subject.class_id,
+    name: subject.name,
+    code: subject.code,
+    type: subject.type || 'COMPULSORY',
+    full_marks: subject.full_marks ?? 100,
+    pass_marks: subject.pass_marks ?? 33,
+    has_practical: Boolean(subject.has_practical),
+  }
+  editSubjectDialogVisible.value = true
+}
+
+function applyEditSubjectPreset(name: string, code: string, hasPractical = false, type = 'COMPULSORY') {
+  editSubjectForm.value.name = name
+  editSubjectForm.value.code = code
+  editSubjectForm.value.has_practical = hasPractical
+  editSubjectForm.value.type = type
+}
+
+function applyEditMarksPreset(fullMarks: number, passMarks: number) {
+  editSubjectForm.value.full_marks = fullMarks
+  editSubjectForm.value.pass_marks = passMarks
+}
+
+async function handleUpdateSubject() {
+  if (!editingSubject.value) return
+  if (!editSubjectForm.value.class_id || !editSubjectForm.value.name || !editSubjectForm.value.code) {
+    notifyWarn('Validation', 'Please provide class, subject title, and code.')
+    return
+  }
+
+  try {
+    editSubjectSubmitting.value = true
+    await api.put(`/api/v1/academics/subjects/${editingSubject.value.id}`, editSubjectForm.value)
+    notifySuccess('Subject Updated', `Curricular subject "${editSubjectForm.value.name}" updated successfully.`)
+    editSubjectDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Subject Error', errorObj.message || 'Could not update subject.')
+  } finally {
+    editSubjectSubmitting.value = false
+  }
+}
+
+async function handleDeleteSubject(subject?: any) {
+  const target = subject || editingSubject.value
+  if (!target) return
+
+  const confirmed = window.confirm(`Are you sure you want to remove subject "${target.name}" (${target.code})? This will unbind it from curriculum structures and grade evaluations.`)
+  if (!confirmed) return
+
+  try {
+    await api.delete(`/api/v1/academics/subjects/${target.id}`)
+    notifySuccess('Subject Removed', `Subject "${target.name}" has been removed.`)
+    if (editSubjectDialogVisible.value && editingSubject.value?.id === target.id) {
+      editSubjectDialogVisible.value = false
+    }
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Delete Error', errorObj.message || 'Could not remove subject.')
   }
 }
 
@@ -783,6 +864,29 @@ onMounted(() => {
         <Column field="has_practical" header="Practical Lab" style="width: 120px">
           <template #body="{ data }">
             <Tag :value="data.has_practical ? 'Yes' : 'No'" :severity="data.has_practical ? 'warn' : 'secondary'" />
+          </template>
+        </Column>
+        <Column header="Actions" style="width: 140px">
+          <template #body="{ data }">
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                class="clean-session-edit-btn"
+                @click="openEditSubjectModal(data)"
+                title="Edit Subject"
+              >
+                <i class="pi pi-pencil text-xs"></i>
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                class="term-row-edit-action text-rose-500 hover:text-rose-700 hover:bg-rose-50 hover:border-rose-200"
+                @click="handleDeleteSubject(data)"
+                title="Delete Subject"
+              >
+                <i class="pi pi-trash text-xs"></i>
+              </button>
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -1864,6 +1968,263 @@ onMounted(() => {
             <i v-else class="pi pi-check text-xs"></i>
             <span>{{ subjectSubmitting ? 'Registering Subject...' : 'Register Subject' }}</span>
           </button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Edit Subject Dialog -->
+    <Dialog
+      v-model:visible="editSubjectDialogVisible"
+      modal
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="subject-edit-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-amber-100 text-amber-800">
+            <i class="pi pi-pencil"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Curricular Subject</h2>
+              <span class="badge-institutional">Curriculum Unit</span>
+            </div>
+            <p class="modal-subtitle">Update syllabus code, mark weightings, academic level, or lab requirements</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateSubject" class="flex flex-col gap-4 pt-1">
+        <!-- Target Class Level -->
+        <FormField id="edit_sub_class" label="Target Grade / Class Level" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-graduation-cap field-icon text-emerald-600"></i>
+            <select
+              id="edit_sub_class"
+              v-model="editSubjectForm.class_id"
+              class="clean-input font-semibold"
+              required
+            >
+              <option value="" disabled>Select academic grade level...</option>
+              <option v-for="c in classStructures" :key="c.id" :value="c.id">
+                {{ c.grade }} (Level #{{ c.numeric_level }})
+              </option>
+            </select>
+          </div>
+        </FormField>
+
+        <!-- Subject Title with Lead Icon & Quick Presets -->
+        <FormField id="edit_sub_name" label="Subject Title / Course Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon text-indigo-600"></i>
+            <input
+              id="edit_sub_name"
+              v-model="editSubjectForm.name"
+              type="text"
+              placeholder="e.g. Higher Mathematics, Physics, Bangla"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSubjectPreset('Bangla', 'BAN-101', false, 'COMPULSORY')"
+            >
+              Bangla
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSubjectPreset('English', 'ENG-102', false, 'COMPULSORY')"
+            >
+              English
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSubjectPreset('Mathematics', 'MTH-103', false, 'COMPULSORY')"
+            >
+              Mathematics
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSubjectPreset('Physics', 'PHY-105', true, 'ELECTIVE')"
+            >
+              Physics
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSubjectPreset('Chemistry', 'CHM-106', true, 'ELECTIVE')"
+            >
+              Chemistry
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSubjectPreset('ICT', 'ICT-107', true, 'COMPULSORY')"
+            >
+              ICT
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Subject Code & Curriculum Classification Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="edit_sub_code" label="Subject Code" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-tag field-icon text-teal-600"></i>
+              <input
+                id="edit_sub_code"
+                v-model="editSubjectForm.code"
+                type="text"
+                placeholder="e.g. PHY-101"
+                class="clean-input font-mono uppercase"
+                required
+              />
+            </div>
+          </FormField>
+
+          <FormField id="edit_sub_type" label="Classification" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-sliders-h field-icon text-amber-600"></i>
+              <select
+                id="edit_sub_type"
+                v-model="editSubjectForm.type"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="COMPULSORY">Compulsory (Core)</option>
+                <option value="ELECTIVE">Elective (Track)</option>
+                <option value="OPTIONAL_4TH">4th Optional</option>
+              </select>
+            </div>
+          </FormField>
+        </div>
+
+        <!-- Full Marks & Pass Marks Grid with Quick Mark Presets -->
+        <div>
+          <div class="grid grid-cols-2 gap-3.5">
+            <FormField id="edit_sub_full" label="Full Marks" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-star field-icon text-amber-500"></i>
+                <input
+                  id="edit_sub_full"
+                  v-model.number="editSubjectForm.full_marks"
+                  type="number"
+                  min="10"
+                  max="200"
+                  placeholder="100"
+                  class="clean-input font-mono"
+                  required
+                />
+              </div>
+            </FormField>
+
+            <FormField id="edit_sub_pass" label="Pass Marks" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-check-circle field-icon text-emerald-600"></i>
+                <input
+                  id="edit_sub_pass"
+                  v-model.number="editSubjectForm.pass_marks"
+                  type="number"
+                  min="1"
+                  max="100"
+                  placeholder="33"
+                  class="clean-input font-mono"
+                  required
+                />
+              </div>
+            </FormField>
+          </div>
+
+          <div class="quick-presets">
+            <span class="preset-label">Weighting:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditMarksPreset(100, 33)"
+            >
+              100 / 33 Pass
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditMarksPreset(50, 17)"
+            >
+              50 / 17 Pass
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditMarksPreset(75, 25)"
+            >
+              75 / 25 Pass
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditMarksPreset(25, 8)"
+            >
+              25 / 8 Pass
+            </button>
+          </div>
+        </div>
+
+        <!-- Interactive Practical / Laboratory Evaluation Toggle Card -->
+        <div class="pt-0.5">
+          <label class="feature-toggle-card" :class="{ selected: editSubjectForm.has_practical }">
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                v-model="editSubjectForm.has_practical"
+                class="custom-toggle-checkbox"
+              />
+              <div class="flex flex-col gap-0.5">
+                <span class="toggle-card-title flex items-center gap-1.5">
+                  <i class="pi pi-compass text-sm text-indigo-600"></i>
+                  Includes Practical / Laboratory Evaluation
+                </span>
+                <span class="toggle-card-desc">
+                  Enables continuous lab experiment assessments, practical exam grading rubrics, and lab credit weighting.
+                </span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Clean Modal Action Footer with Delete Option -->
+        <div class="flex items-center justify-between gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg transition-colors flex items-center gap-1.5"
+            @click="handleDeleteSubject()"
+          >
+            <i class="pi pi-trash"></i>
+            <span>Delete Subject</span>
+          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="modal-btn-cancel"
+              @click="editSubjectDialogVisible = false"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="editSubjectSubmitting"
+              class="modal-btn-primary"
+            >
+              <i v-if="editSubjectSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+              <i v-else class="pi pi-check text-xs"></i>
+              <span>{{ editSubjectSubmitting ? 'Saving Changes...' : 'Save Changes' }}</span>
+            </button>
+          </div>
         </div>
       </form>
     </Dialog>
