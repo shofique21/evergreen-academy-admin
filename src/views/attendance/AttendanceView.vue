@@ -839,47 +839,49 @@ onMounted(async () => {
     </div>
 
     <!-- 3. Summaries & Analytics Panel -->
-    <div v-if="activeTab === 'reports'" class="flex flex-col gap-6">
-      <div class="table-card glass-panel flex flex-col gap-5">
-        <!-- Analytics Control & Date Presets Header -->
-        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+    <div v-if="activeTab === 'reports'" class="flex flex-col gap-8">
+      
+      <!-- 3.1. Analytics Filters & Range Configuration -->
+      <div class="table-card glass-panel p-6 sm:p-7 flex flex-col gap-6">
+        <!-- Header & Presets -->
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200/80">
           <div>
-            <div class="flex items-center gap-2">
-              <h3 class="text-base font-bold text-slate-800">Section Attendance Analytics</h3>
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+            <div class="flex items-center gap-2.5">
+              <h3 class="text-base font-bold text-slate-800 tracking-tight">Section Attendance Analytics</h3>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
                 Executive Dashboard
               </span>
             </div>
-            <p class="text-xs text-slate-500 mt-0.5">Aggregate presence percentage, punctuality trends, and absenteeism audit across calendar dates</p>
+            <p class="text-xs text-slate-500 mt-1">Aggregate presence percentage, punctuality trends, and absenteeism audit across calendar dates</p>
           </div>
 
           <!-- Quick Date Range Presets -->
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="text-[11px] font-semibold text-slate-400 mr-0.5 uppercase tracking-wider">Presets:</span>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Presets:</span>
             <button
               type="button"
-              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-2xs hover:border-slate-300"
               @click="setAnalyticsPreset(7)"
             >
               Last 7 Days
             </button>
             <button
               type="button"
-              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-2xs hover:border-slate-300"
               @click="setAnalyticsPreset(14)"
             >
               Last 14 Days
             </button>
             <button
               type="button"
-              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-2xs hover:border-slate-300"
               @click="setAnalyticsPreset(30)"
             >
               Last 30 Days
             </button>
             <button
               type="button"
-              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-2xs hover:border-slate-300"
               @click="setAnalyticsMonthPreset()"
             >
               This Month
@@ -887,8 +889,8 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Filter Inputs Bar (Grid with Class, Section, From Date, To Date, Calculate Button) -->
-        <div class="attendance-filter-bar grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4 p-3.5 sm:p-4 bg-slate-50/80 rounded-xl border border-slate-200/80 shadow-xs text-xs">
+        <!-- Filter Controls Bar -->
+        <div class="attendance-filter-bar grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 p-4 sm:p-5 bg-slate-50/90 rounded-2xl border border-slate-200/80 shadow-2xs text-xs">
           <FormField id="summary_class" label="Class / Grade Level" class="min-w-0 attendance-filter-col">
             <select id="summary_class" v-model="summaryClassId" class="attendance-filter-input font-medium">
               <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
@@ -920,59 +922,173 @@ onMounted(async () => {
             />
           </div>
         </div>
+      </div>
 
+      <!-- 3.2. Analytics Results Panel (Rendered when summaryData is present) -->
+      <div v-if="summaryData" class="table-card glass-panel p-6 sm:p-8 flex flex-col gap-8">
+        
         <!-- Active Context & Executive Health Summary Banner -->
-        <div v-if="summaryData" class="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl">
-          <div class="flex items-center gap-3 flex-wrap">
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Analyzing:</span>
-              <span class="px-2.5 py-1 bg-white border border-slate-300 text-slate-800 text-xs font-bold rounded-md shadow-2xs">
-                {{ selectedSummaryClassName }} • {{ selectedSummarySectionName }}
-              </span>
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 bg-slate-50/90 border border-slate-200/80 rounded-2xl">
+          <div class="flex items-center gap-3.5 flex-wrap">
+            <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+              <i class="pi pi-building text-base"></i>
             </div>
-            <div class="flex items-center gap-1.5 text-xs text-slate-600">
-              <i class="pi pi-calendar text-slate-400"></i>
-              <span class="font-medium font-mono">{{ formatHumanDate(summaryData.start_date) }}</span>
-              <span class="text-slate-400">→</span>
-              <span class="font-medium font-mono">{{ formatHumanDate(summaryData.end_date) }}</span>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Analyzing Section:</span>
+                <span class="text-sm font-bold text-slate-900">
+                  {{ selectedSummaryClassName }} • {{ selectedSummarySectionName }}
+                </span>
+              </div>
+              <div class="flex items-center gap-2 mt-1 text-xs text-slate-600 flex-wrap">
+                <span class="inline-flex items-center gap-1 font-mono font-medium text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  <i class="pi pi-calendar text-slate-400 text-[11px]"></i>
+                  {{ formatHumanDate(summaryData.start_date) }} → {{ formatHumanDate(summaryData.end_date) }}
+                </span>
+                <span class="text-slate-300">•</span>
+                <span class="font-medium text-slate-600">
+                  <strong class="text-slate-800">{{ summaryData.sessions_count }}</strong> Sessions Recorded
+                </span>
+                <span class="text-slate-300">•</span>
+                <span class="font-medium text-slate-600">
+                  <strong class="text-slate-800">{{ summaryData.total_marked }}</strong> Student Check-ins
+                </span>
+              </div>
             </div>
-            <span class="text-xs text-slate-300">|</span>
-            <span class="text-xs font-medium text-slate-600">
-              <strong class="text-slate-800">{{ summaryData.sessions_count }}</strong> Sessions Recorded ({{ summaryData.total_marked }} Student Check-ins)
-            </span>
           </div>
 
           <!-- Health Rating Badge -->
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Section Health:</span>
+          <div class="flex items-center gap-3">
             <div
-              class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-2xs"
+              class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border shadow-2xs"
               :class="analyticsBreakdown.colorClass"
             >
               <i
-                class="pi"
+                class="pi text-sm"
                 :class="{
                   'pi-check-circle': analyticsBreakdown.rateStatus === 'OPTIMAL',
                   'pi-exclamation-triangle': analyticsBreakdown.rateStatus === 'ACCEPTABLE',
                   'pi-exclamation-circle': analyticsBreakdown.rateStatus === 'CRITICAL'
                 }"
               ></i>
-              <span>{{ analyticsBreakdown.rateText }} ({{ summaryData.attendance_rate }}%)</span>
+              <span class="tracking-wide">{{ analyticsBreakdown.rateText }} ({{ summaryData.attendance_rate }}%)</span>
             </div>
           </div>
         </div>
 
-        <!-- Visual Proportional Progress Breakdown Bar -->
-        <div v-if="summaryData && summaryData.total_marked > 0" class="flex flex-col gap-2.5 p-4 bg-white border border-slate-200/80 rounded-xl shadow-2xs">
-          <div class="flex justify-between items-center text-xs">
-            <span class="font-bold text-slate-700 flex items-center gap-1.5">
-              <i class="pi pi-sliders-h text-slate-400"></i> Proportional Attendance Distribution
-            </span>
-            <span class="text-slate-500 font-mono">{{ summaryData.total_marked }} total marked roll-calls</span>
+        <!-- Section 1: Executive KPI Metrics Grid (Spacious 5-column layout) -->
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <i class="pi pi-chart-bar text-slate-400"></i> Section Attendance Metrics
+            </h4>
+            <span class="text-xs text-slate-400 font-medium">Threshold target: &ge; 85% optimal compliance</span>
           </div>
 
-          <!-- Multi-segment stacked progress bar -->
-          <div class="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+            <!-- 1. Hero KPI: Attendance Rate -->
+            <div class="p-5 bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl shadow-sm flex flex-col justify-between">
+              <div class="flex justify-between items-start">
+                <div>
+                  <span class="text-xs font-semibold uppercase tracking-wider text-emerald-100 block">Overall Attendance Rate</span>
+                  <span class="text-3xl font-black tracking-tight mt-1.5 block">{{ summaryData.attendance_rate }}%</span>
+                </div>
+                <div class="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+                  <i class="pi pi-chart-line text-lg text-white"></i>
+                </div>
+              </div>
+              <div class="mt-4 pt-3.5 border-t border-white/20 text-xs text-emerald-100 flex items-center justify-between">
+                <span>{{ analyticsBreakdown.rateText }}</span>
+                <span class="font-mono text-white font-semibold">Min: 85%</span>
+              </div>
+            </div>
+
+            <!-- 2. Present Count -->
+            <div class="p-5 bg-white border border-slate-200/90 rounded-2xl shadow-2xs hover:border-emerald-300 transition-colors flex flex-col justify-between">
+              <div class="flex justify-between items-start">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Present</span>
+                <div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <i class="pi pi-check text-xs font-bold"></i>
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-2xl font-black text-slate-800">{{ summaryData.present }}</span>
+                <span class="text-xs text-emerald-700 font-bold block mt-1">{{ analyticsBreakdown.presentPct }}% of total</span>
+              </div>
+              <div class="mt-3 pt-2.5 border-t border-slate-100 text-[11px] text-slate-400">
+                Physically attended roll-call
+              </div>
+            </div>
+
+            <!-- 3. Late Count -->
+            <div class="p-5 bg-white border border-slate-200/90 rounded-2xl shadow-2xs hover:border-amber-300 transition-colors flex flex-col justify-between">
+              <div class="flex justify-between items-start">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Late Arrivals</span>
+                <div class="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <i class="pi pi-clock text-xs font-bold"></i>
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-2xl font-black text-slate-800">{{ summaryData.late }}</span>
+                <span class="text-xs text-amber-700 font-bold block mt-1">{{ analyticsBreakdown.latePct }}% of total</span>
+              </div>
+              <div class="mt-3 pt-2.5 border-t border-slate-100 text-[11px] text-slate-400">
+                Admitted after cutoff bell
+              </div>
+            </div>
+
+            <!-- 4. Absent Count -->
+            <div class="p-5 bg-white border border-slate-200/90 rounded-2xl shadow-2xs hover:border-rose-300 transition-colors flex flex-col justify-between">
+              <div class="flex justify-between items-start">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Absences</span>
+                <div class="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <i class="pi pi-times text-xs font-bold"></i>
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-2xl font-black text-rose-700">{{ summaryData.absent }}</span>
+                <span class="text-xs text-rose-700 font-bold block mt-1">{{ analyticsBreakdown.absentPct }}% of total</span>
+              </div>
+              <div class="mt-3 pt-2.5 border-t border-slate-100 text-[11px] text-slate-400">
+                Unexcused student absences
+              </div>
+            </div>
+
+            <!-- 5. Excused & Leave -->
+            <div class="p-5 bg-white border border-slate-200/90 rounded-2xl shadow-2xs hover:border-sky-300 transition-colors flex flex-col justify-between">
+              <div class="flex justify-between items-start">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Excused / Leave</span>
+                <div class="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                  <i class="pi pi-shield text-xs font-bold"></i>
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-2xl font-black text-slate-800">{{ summaryData.excused + (summaryData.leave || 0) }}</span>
+                <span class="text-xs text-sky-700 font-bold block mt-1">{{ analyticsBreakdown.excusedPct }}% of total</span>
+              </div>
+              <div class="mt-3 pt-2.5 border-t border-slate-100 text-[11px] text-slate-400">
+                Medical & official permits
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Proportional Attendance Distribution (Dedicated spaced section) -->
+        <div v-if="summaryData.total_marked > 0" class="pt-6 border-t border-slate-200/80 flex flex-col gap-4">
+          <div class="flex justify-between items-center text-xs">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <i class="pi pi-sliders-h text-slate-400"></i> Proportional Attendance Distribution
+              </h4>
+              <p class="text-xs text-slate-500 mt-0.5">Visual ratio breakdown of all marked roll-calls in this date range</p>
+            </div>
+            <span class="text-xs text-slate-500 font-mono bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+              <strong>{{ summaryData.total_marked }}</strong> marked student records
+            </span>
+          </div>
+
+          <!-- Multi-segment stacked progress bar with generous height -->
+          <div class="w-full h-4 bg-slate-100 rounded-full overflow-hidden flex shadow-inner my-2">
             <div
               v-if="analyticsBreakdown.presentPct > 0"
               class="bg-emerald-500 hover:bg-emerald-600 transition-all duration-300 relative group cursor-pointer"
@@ -999,147 +1115,77 @@ onMounted(async () => {
             ></div>
           </div>
 
-          <!-- Proportional Chips Legend -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
-            <div class="flex items-center gap-2 p-2 bg-emerald-50/60 border border-emerald-200/60 rounded-lg">
-              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+          <!-- Spacious Proportional Chips Legend -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1 text-xs">
+            <div class="flex items-center gap-3 p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl">
+              <span class="w-3.5 h-3.5 rounded-full bg-emerald-500 shrink-0 shadow-2xs"></span>
               <div class="flex flex-col min-w-0">
-                <span class="text-slate-600 font-medium">Present</span>
-                <span class="font-bold text-slate-800">{{ summaryData.present }} <span class="text-emerald-700 font-mono text-[11px]">({{ analyticsBreakdown.presentPct }}%)</span></span>
+                <span class="text-slate-600 font-semibold">Present</span>
+                <span class="font-extrabold text-slate-800 text-sm mt-0.5">
+                  {{ summaryData.present }} <span class="text-emerald-700 font-mono text-xs font-semibold">({{ analyticsBreakdown.presentPct }}%)</span>
+                </span>
               </div>
             </div>
 
-            <div class="flex items-center gap-2 p-2 bg-amber-50/60 border border-amber-200/60 rounded-lg">
-              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+            <div class="flex items-center gap-3 p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-xl">
+              <span class="w-3.5 h-3.5 rounded-full bg-amber-400 shrink-0 shadow-2xs"></span>
               <div class="flex flex-col min-w-0">
-                <span class="text-slate-600 font-medium">Late Arrivals</span>
-                <span class="font-bold text-slate-800">{{ summaryData.late }} <span class="text-amber-700 font-mono text-[11px]">({{ analyticsBreakdown.latePct }}%)</span></span>
+                <span class="text-slate-600 font-semibold">Late Arrivals</span>
+                <span class="font-extrabold text-slate-800 text-sm mt-0.5">
+                  {{ summaryData.late }} <span class="text-amber-700 font-mono text-xs font-semibold">({{ analyticsBreakdown.latePct }}%)</span>
+                </span>
               </div>
             </div>
 
-            <div class="flex items-center gap-2 p-2 bg-sky-50/60 border border-sky-200/60 rounded-lg">
-              <span class="w-2.5 h-2.5 rounded-full bg-sky-400 shrink-0"></span>
+            <div class="flex items-center gap-3 p-3.5 bg-sky-50/60 border border-sky-200/80 rounded-xl">
+              <span class="w-3.5 h-3.5 rounded-full bg-sky-400 shrink-0 shadow-2xs"></span>
               <div class="flex flex-col min-w-0">
-                <span class="text-slate-600 font-medium">Excused / Leave</span>
-                <span class="font-bold text-slate-800">{{ summaryData.excused + (summaryData.leave || 0) }} <span class="text-sky-700 font-mono text-[11px]">({{ analyticsBreakdown.excusedPct }}%)</span></span>
+                <span class="text-slate-600 font-semibold">Excused / Leave</span>
+                <span class="font-extrabold text-slate-800 text-sm mt-0.5">
+                  {{ summaryData.excused + (summaryData.leave || 0) }} <span class="text-sky-700 font-mono text-xs font-semibold">({{ analyticsBreakdown.excusedPct }}%)</span>
+                </span>
               </div>
             </div>
 
-            <div class="flex items-center gap-2 p-2 bg-rose-50/60 border border-rose-200/60 rounded-lg">
-              <span class="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+            <div class="flex items-center gap-3 p-3.5 bg-rose-50/60 border border-rose-200/80 rounded-xl">
+              <span class="w-3.5 h-3.5 rounded-full bg-rose-500 shrink-0 shadow-2xs"></span>
               <div class="flex flex-col min-w-0">
-                <span class="text-slate-600 font-medium">Absences</span>
-                <span class="font-bold text-slate-800">{{ summaryData.absent }} <span class="text-rose-700 font-mono text-[11px]">({{ analyticsBreakdown.absentPct }}%)</span></span>
+                <span class="text-slate-600 font-semibold">Absences</span>
+                <span class="font-extrabold text-slate-800 text-sm mt-0.5">
+                  {{ summaryData.absent }} <span class="text-rose-700 font-mono text-xs font-semibold">({{ analyticsBreakdown.absentPct }}%)</span>
+                </span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Executive KPI Metrics Grid -->
-        <div v-if="summaryData" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
-          <!-- 1. Hero KPI: Attendance Rate -->
-          <div class="p-4 bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-xl shadow-md sm:col-span-2 flex flex-col justify-between">
-            <div class="flex justify-between items-start">
-              <div>
-                <span class="text-xs font-semibold uppercase tracking-wider text-emerald-100 block">Overall Attendance Rate</span>
-                <span class="text-2xl sm:text-3xl font-black tracking-tight mt-1 block">{{ summaryData.attendance_rate }}%</span>
-              </div>
-              <div class="w-10 h-10 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
-                <i class="pi pi-chart-line text-lg text-white"></i>
-              </div>
-            </div>
-            <div class="mt-3 pt-3 border-t border-white/20 text-xs text-emerald-100 flex items-center justify-between">
-              <span>{{ analyticsBreakdown.rateText }}</span>
-              <span class="font-mono text-white font-semibold">Min Target: 85%</span>
-            </div>
-          </div>
-
-          <!-- 2. Present Count -->
-          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
-            <div class="flex justify-between items-start">
-              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Present</span>
-              <div class="w-7 h-7 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <i class="pi pi-check text-xs"></i>
-              </div>
-            </div>
-            <div class="mt-2">
-              <span class="text-xl font-bold text-slate-800">{{ summaryData.present }}</span>
-              <span class="text-xs text-emerald-600 font-semibold block mt-0.5">{{ analyticsBreakdown.presentPct }}% of roster</span>
-            </div>
-            <span class="text-[11px] text-slate-400 mt-2 block">Physically in class</span>
-          </div>
-
-          <!-- 3. Late Count -->
-          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
-            <div class="flex justify-between items-start">
-              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Late</span>
-              <div class="w-7 h-7 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center">
-                <i class="pi pi-clock text-xs"></i>
-              </div>
-            </div>
-            <div class="mt-2">
-              <span class="text-xl font-bold text-slate-800">{{ summaryData.late }}</span>
-              <span class="text-xs text-amber-600 font-semibold block mt-0.5">{{ analyticsBreakdown.latePct }}% of roster</span>
-            </div>
-            <span class="text-[11px] text-slate-400 mt-2 block">Post-bell arrivals</span>
-          </div>
-
-          <!-- 4. Absent Count -->
-          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
-            <div class="flex justify-between items-start">
-              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Absent</span>
-              <div class="w-7 h-7 rounded-md bg-rose-50 text-rose-600 flex items-center justify-center">
-                <i class="pi pi-times text-xs"></i>
-              </div>
-            </div>
-            <div class="mt-2">
-              <span class="text-xl font-bold text-rose-700">{{ summaryData.absent }}</span>
-              <span class="text-xs text-rose-600 font-semibold block mt-0.5">{{ analyticsBreakdown.absentPct }}% of roster</span>
-            </div>
-            <span class="text-[11px] text-slate-400 mt-2 block">Unexcused missed</span>
-          </div>
-
-          <!-- 5. Excused & Leave -->
-          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
-            <div class="flex justify-between items-start">
-              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Excused</span>
-              <div class="w-7 h-7 rounded-md bg-sky-50 text-sky-600 flex items-center justify-center">
-                <i class="pi pi-shield text-xs"></i>
-              </div>
-            </div>
-            <div class="mt-2">
-              <span class="text-xl font-bold text-slate-800">{{ summaryData.excused + (summaryData.leave || 0) }}</span>
-              <span class="text-xs text-sky-600 font-semibold block mt-0.5">{{ analyticsBreakdown.excusedPct }}% excused</span>
-            </div>
-            <span class="text-[11px] text-slate-400 mt-2 block">Approved leaves</span>
-          </div>
-        </div>
-
-        <!-- Loading & Empty States for Analytics -->
-        <div v-if="summaryLoading" class="py-8 text-center text-slate-500">
-          <i class="pi pi-spin pi-spinner text-xl mr-2 text-emerald-600"></i> Calculating section attendance metrics...
-        </div>
-        <div v-else-if="!summaryData" class="p-8 text-center bg-slate-50 border border-dashed border-slate-300 rounded-xl">
-          <i class="pi pi-chart-pie text-3xl text-slate-400 mb-2"></i>
-          <h4 class="text-sm font-bold text-slate-700">No Analytics Loaded Yet</h4>
-          <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">Select a Class, Section, and Date Range above, then click "Analyze Attendance" to generate the performance ledger.</p>
-        </div>
       </div>
 
-      <!-- Student Individual Attendance Dossier Lookup -->
-      <div class="table-card glass-panel flex flex-col gap-4">
-        <div class="flex justify-between items-start flex-wrap gap-2 pb-3 border-b border-slate-100">
+      <!-- Loading & Empty States for Analytics -->
+      <div v-if="summaryLoading" class="table-card glass-panel p-12 text-center text-slate-500">
+        <i class="pi pi-spin pi-spinner text-2xl mr-2 text-emerald-600"></i>
+        <span class="text-sm font-semibold">Calculating section attendance metrics...</span>
+      </div>
+      <div v-else-if="!summaryData" class="table-card glass-panel p-12 text-center bg-slate-50 border border-dashed border-slate-300 rounded-2xl">
+        <i class="pi pi-chart-pie text-4xl text-slate-300 mb-3"></i>
+        <h4 class="text-base font-bold text-slate-700">No Analytics Loaded Yet</h4>
+        <p class="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">Select a Class, Section, and Date Range above, then click "Analyze Attendance" to generate the performance ledger.</p>
+      </div>
+
+      <!-- 3.3. Student Individual Attendance Dossier Lookup -->
+      <div class="table-card glass-panel p-6 sm:p-8 flex flex-col gap-6">
+        <div class="flex justify-between items-start flex-wrap gap-3 pb-5 border-b border-slate-200/80">
           <div>
-            <h3 class="text-base font-bold text-slate-800">Individual Student Attendance Dossier</h3>
-            <p class="text-xs text-slate-500">Inspect granular daily attendance records, punctuality stamps, and audit correction logs for any student</p>
+            <h3 class="text-base font-bold text-slate-800 tracking-tight">Individual Student Attendance Dossier</h3>
+            <p class="text-xs text-slate-500 mt-1">Inspect granular daily attendance records, punctuality stamps, and audit correction logs for any student</p>
           </div>
-          <div class="text-xs text-slate-400 flex items-center gap-1">
-            <i class="pi pi-info-circle"></i> Supports Student UID (e.g. STD-2026-6-0001) or Section Dropdown
+          <div class="text-xs text-slate-400 font-medium flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+            <i class="pi pi-info-circle text-slate-400"></i> Supports Student UID (e.g. STD-2026-6-0001) or Section Dropdown
           </div>
         </div>
 
         <!-- Search & Student Dropdown Bar -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-5 bg-slate-50/90 rounded-2xl border border-slate-200/80">
           <!-- Option A: Pick enrolled student from section -->
           <FormField id="student_select_dropdown" label="Select Enrolled Student (From Active Section)">
             <select
@@ -1174,7 +1220,7 @@ onMounted(async () => {
                 label="Search"
                 icon="pi pi-search"
                 size="small"
-                class="brand-gradient-bg border-none h-9 px-4 font-semibold rounded-lg shrink-0"
+                class="brand-gradient-bg border-none h-9 px-4 font-semibold rounded-lg shrink-0 shadow-xs"
                 :loading="studentReportLoading"
                 @click="searchStudentReport()"
               />
@@ -1183,80 +1229,84 @@ onMounted(async () => {
         </div>
 
         <!-- Student Dossier Report Display -->
-        <div v-if="studentReportData" class="flex flex-col gap-4">
+        <div v-if="studentReportData" class="flex flex-col gap-6 pt-2">
           <!-- Student Header & Key Metrics -->
-          <div class="p-4 bg-gradient-to-r from-slate-50 to-emerald-50/30 border border-slate-200 rounded-xl flex items-center justify-between flex-wrap gap-4">
-            <div class="flex items-center gap-3">
-              <div class="w-11 h-11 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+          <div class="p-5 sm:p-6 bg-gradient-to-r from-slate-50 via-white to-emerald-50/30 border border-slate-200/90 rounded-2xl shadow-2xs flex items-center justify-between flex-wrap gap-5">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 rounded-2xl bg-emerald-600 text-white font-bold flex items-center justify-center text-base shadow-xs shrink-0">
                 {{ studentReportData.student.name?.charAt(0) || 'S' }}
               </div>
               <div>
-                <div class="flex items-center gap-2">
-                  <span class="font-bold text-slate-800 text-sm">{{ studentReportData.student.name }}</span>
-                  <span class="font-mono text-xs bg-slate-200/80 text-slate-700 px-2 py-0.5 rounded font-medium">{{ studentReportData.student.student_uid }}</span>
+                <div class="flex items-center gap-2.5 flex-wrap">
+                  <span class="font-bold text-slate-900 text-base">{{ studentReportData.student.name }}</span>
+                  <span class="font-mono text-xs bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-semibold border border-slate-200">
+                    {{ studentReportData.student.student_uid }}
+                  </span>
                 </div>
-                <span class="text-xs text-slate-500 block mt-0.5">
-                  {{ studentReportData.student.class }} • {{ studentReportData.student.section }} &nbsp;|&nbsp; Roll Number: <strong>#{{ studentReportData.student.roll_number }}</strong>
+                <span class="text-xs text-slate-500 block mt-1">
+                  {{ studentReportData.student.class }} • {{ studentReportData.student.section }} &nbsp;|&nbsp; Roll Number: <strong class="text-slate-800">#{{ studentReportData.student.roll_number }}</strong>
                 </span>
               </div>
             </div>
 
-            <div class="flex items-center gap-2 flex-wrap">
-              <div class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-center shadow-2xs">
-                <span class="text-[10px] text-slate-400 uppercase font-bold block">Working Days</span>
-                <span class="font-bold text-slate-800 text-sm">{{ studentReportData.summary.total_working_days }}</span>
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <div class="px-4 py-2 bg-white border border-slate-200 rounded-xl text-center shadow-2xs min-w-[70px]">
+                <span class="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Working Days</span>
+                <span class="font-black text-slate-800 text-sm mt-0.5 block">{{ studentReportData.summary.total_working_days }}</span>
               </div>
-              <div class="px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-center shadow-2xs">
-                <span class="text-[10px] text-emerald-600 uppercase font-bold block">Present</span>
-                <span class="font-bold text-emerald-800 text-sm">{{ studentReportData.summary.present }}</span>
+              <div class="px-4 py-2 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-center shadow-2xs min-w-[70px]">
+                <span class="text-[10px] text-emerald-700 uppercase font-bold tracking-wider block">Present</span>
+                <span class="font-black text-emerald-800 text-sm mt-0.5 block">{{ studentReportData.summary.present }}</span>
               </div>
-              <div class="px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-center shadow-2xs">
-                <span class="text-[10px] text-rose-600 uppercase font-bold block">Absent</span>
-                <span class="font-bold text-rose-800 text-sm">{{ studentReportData.summary.absent }}</span>
+              <div class="px-4 py-2 bg-rose-50/80 border border-rose-200/90 rounded-xl text-center shadow-2xs min-w-[70px]">
+                <span class="text-[10px] text-rose-700 uppercase font-bold tracking-wider block">Absent</span>
+                <span class="font-black text-rose-800 text-sm mt-0.5 block">{{ studentReportData.summary.absent }}</span>
               </div>
-              <div class="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-center shadow-2xs">
-                <span class="text-[10px] text-amber-600 uppercase font-bold block">Late</span>
-                <span class="font-bold text-amber-800 text-sm">{{ studentReportData.summary.late }}</span>
+              <div class="px-4 py-2 bg-amber-50/80 border border-amber-200/90 rounded-xl text-center shadow-2xs min-w-[70px]">
+                <span class="text-[10px] text-amber-700 uppercase font-bold tracking-wider block">Late</span>
+                <span class="font-black text-amber-800 text-sm mt-0.5 block">{{ studentReportData.summary.late }}</span>
               </div>
-              <div class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-center shadow-sm">
-                <span class="text-[10px] text-emerald-100 uppercase font-bold block">Attendance</span>
-                <span class="font-black text-sm">{{ studentReportData.summary.attendance_rate }}%</span>
+              <div class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-center shadow-xs min-w-[85px]">
+                <span class="text-[10px] text-emerald-100 uppercase font-bold tracking-wider block">Attendance</span>
+                <span class="font-black text-sm mt-0.5 block">{{ studentReportData.summary.attendance_rate }}%</span>
               </div>
             </div>
           </div>
 
           <!-- Historical Attendance Table -->
-          <div class="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-            <div class="p-2.5 bg-slate-100/80 border-b border-slate-200 text-xs font-semibold text-slate-600 flex justify-between items-center">
-              <span>Historical Attendance Ledger ({{ studentReportData.records?.length || 0 }} records)</span>
-              <span class="text-slate-400 font-normal">Ordered by most recent date</span>
+          <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+            <div class="p-3.5 bg-slate-50/90 border-b border-slate-200 text-xs font-bold text-slate-700 flex justify-between items-center">
+              <span class="flex items-center gap-2">
+                <i class="pi pi-list text-slate-400"></i> Historical Attendance Ledger ({{ studentReportData.records?.length || 0 }} records)
+              </span>
+              <span class="text-slate-400 font-medium">Sorted chronologically (most recent first)</span>
             </div>
-            <div class="max-h-72 overflow-y-auto">
+            <div class="max-h-80 overflow-y-auto">
               <table class="w-full text-left text-xs">
-                <thead class="bg-slate-50 text-slate-600 font-semibold sticky top-0 border-b border-slate-200">
+                <thead class="bg-slate-100/80 text-slate-600 font-bold sticky top-0 border-b border-slate-200">
                   <tr>
-                    <th class="p-2.5">Date</th>
-                    <th class="p-2.5">Mode</th>
-                    <th class="p-2.5">Status</th>
-                    <th class="p-2.5">Check-in Time</th>
-                    <th class="p-2.5">Remarks / Audit Note</th>
+                    <th class="py-3 px-4">Date</th>
+                    <th class="py-3 px-4">Policy Mode</th>
+                    <th class="py-3 px-4">Status</th>
+                    <th class="py-3 px-4">Check-in Time</th>
+                    <th class="py-3 px-4">Remarks / Audit Note</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                  <tr v-for="rec in studentReportData.records" :key="rec.id" class="hover:bg-slate-50/70 transition-colors">
-                    <td class="p-2.5 font-mono font-bold text-slate-700">{{ rec.date }}</td>
-                    <td class="p-2.5 text-slate-600">
-                      <span class="px-2 py-0.5 rounded text-[11px] bg-slate-100 font-medium text-slate-600">
-                        {{ rec.type === 'DAILY_HOMEROOM' ? 'Daily Homeroom' : (rec.period || 'Period') }}
+                  <tr v-for="rec in studentReportData.records" :key="rec.id" class="hover:bg-slate-50/80 transition-colors">
+                    <td class="py-3 px-4 font-mono font-bold text-slate-800">{{ rec.date }}</td>
+                    <td class="py-3 px-4 text-slate-600">
+                      <span class="px-2.5 py-1 rounded-md text-[11px] bg-slate-100 font-semibold text-slate-600 border border-slate-200/60">
+                        {{ rec.type === 'DAILY_HOMEROOM' ? 'Daily Homeroom' : (rec.period || 'Period-Wise') }}
                       </span>
                     </td>
-                    <td class="p-2.5">
+                    <td class="py-3 px-4">
                       <StatusBadge :status="rec.status" size="small" />
                     </td>
-                    <td class="p-2.5 font-mono text-slate-600">{{ rec.check_in_time || '—' }}</td>
-                    <td class="p-2.5 text-slate-600">
-                      <span v-if="rec.correction_reason" class="text-amber-700 font-medium">
-                        <i class="pi pi-pencil text-[10px] mr-1"></i>{{ rec.correction_reason }}
+                    <td class="py-3 px-4 font-mono text-slate-600">{{ rec.check_in_time || '—' }}</td>
+                    <td class="py-3 px-4 text-slate-600">
+                      <span v-if="rec.correction_reason" class="text-amber-800 font-semibold inline-flex items-center gap-1">
+                        <i class="pi pi-pencil text-[10px]"></i>{{ rec.correction_reason }}
                       </span>
                       <span v-else-if="rec.remarks">{{ rec.remarks }}</span>
                       <span v-else class="text-slate-300">—</span>
@@ -1269,9 +1319,10 @@ onMounted(async () => {
         </div>
 
         <!-- Empty state for dossier -->
-        <div v-else-if="!studentReportLoading" class="p-6 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-500">
-          <i class="pi pi-user text-2xl text-slate-300 mb-1"></i>
-          <p class="text-xs font-medium">Select a student from the dropdown or search by Student UID to view their complete attendance ledger.</p>
+        <div v-else-if="!studentReportLoading" class="p-8 text-center bg-slate-50 border border-dashed border-slate-200/90 rounded-2xl text-slate-500">
+          <i class="pi pi-user text-3xl text-slate-300 mb-2"></i>
+          <p class="text-xs font-semibold text-slate-600">Select a student from the dropdown or search by Student UID</p>
+          <p class="text-xs text-slate-400 mt-1">Their detailed daily presence, timestamped check-ins, and correction audit history will appear here.</p>
         </div>
       </div>
     </div>
