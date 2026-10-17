@@ -86,17 +86,89 @@ const correctionForm = ref({
   remarks: '',
 })
 
-// Summary State
+// Analytics & Summary State
+const summaryClassId = ref<number | ''>('')
+const summarySectionId = ref<number | ''>('')
+const summaryStartDate = ref<string>(new Date(Date.now() - 14 * 86400000).toISOString().substring(0, 10))
+const summaryEndDate = ref<string>(new Date().toISOString().substring(0, 10))
 const summaryData = ref<AttendanceSummary | null>(null)
 const summaryLoading = ref(false)
-const summarySectionId = ref<number | ''>('')
-const summaryStartDate = ref<string>(new Date(Date.now() - 7 * 86400000).toISOString().substring(0, 10))
-const summaryEndDate = ref<string>(new Date().toISOString().substring(0, 10))
+const summaryStudentsList = ref<Array<{ id: number; student_uid: string; name: string; roll_number: number }>>([])
+const summaryStudentsLoading = ref(false)
 
-// Student Report Search
+// Student Dossier Search
 const reportStudentId = ref<string>('')
+const selectedDossierStudentUid = ref<string>('')
 const studentReportData = ref<any | null>(null)
 const studentReportLoading = ref(false)
+
+const summarySectionsList = computed(() => {
+  if (!summaryClassId.value) return []
+  const cls = classesList.value.find((c) => c.id === Number(summaryClassId.value))
+  return cls?.sections || []
+})
+
+const selectedSummaryClassName = computed(() => {
+  const cls = classesList.value.find((c) => c.id === Number(summaryClassId.value))
+  return cls?.name || 'Class'
+})
+
+const selectedSummarySectionName = computed(() => {
+  for (const cls of classesList.value) {
+    const sec = cls.sections?.find((s) => s.id === Number(summarySectionId.value))
+    if (sec) return sec.name
+  }
+  return 'Section'
+})
+
+const analyticsBreakdown = computed(() => {
+  if (!summaryData.value || summaryData.value.total_marked === 0) {
+    return {
+      presentPct: 0,
+      latePct: 0,
+      excusedPct: 0,
+      absentPct: 0,
+      rateStatus: 'NEUTRAL' as const,
+      rateText: 'No Data Recorded',
+      colorClass: 'text-slate-600 bg-slate-100 border-slate-200',
+    }
+  }
+  const total = summaryData.value.total_marked
+  const presentPct = Math.round((summaryData.value.present / total) * 1000) / 10
+  const latePct = Math.round((summaryData.value.late / total) * 1000) / 10
+  const excused = summaryData.value.excused + (summaryData.value.leave || 0)
+  const excusedPct = Math.round((excused / total) * 1000) / 10
+  const absentPct = Math.round((summaryData.value.absent / total) * 1000) / 10
+  const rate = summaryData.value.attendance_rate
+
+  let rateStatus: 'OPTIMAL' | 'ACCEPTABLE' | 'CRITICAL' = 'OPTIMAL'
+  let rateText = 'Optimal Attendance Compliance'
+  let colorClass = 'text-emerald-700 bg-emerald-50 border-emerald-200'
+
+  if (rate >= 85) {
+    rateStatus = 'OPTIMAL'
+    rateText = 'Optimal Attendance Compliance'
+    colorClass = 'text-emerald-700 bg-emerald-50 border-emerald-200'
+  } else if (rate >= 75) {
+    rateStatus = 'ACCEPTABLE'
+    rateText = 'Acceptable Attendance'
+    colorClass = 'text-amber-700 bg-amber-50 border-amber-200'
+  } else {
+    rateStatus = 'CRITICAL'
+    rateText = 'Critical: Needs Attention'
+    colorClass = 'text-rose-700 bg-rose-50 border-rose-200'
+  }
+
+  return {
+    presentPct,
+    latePct,
+    excusedPct,
+    absentPct,
+    rateStatus,
+    rateText,
+    colorClass,
+  }
+})
 
 const canLock = computed(() => {
   return authStore.hasPermission('attendance.lock') || authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('principal')
@@ -125,11 +197,12 @@ async function fetchMetadata() {
 
     if (classesList.value.length > 0) {
       selectedClassId.value = classesList.value[0].id
+      summaryClassId.value = classesList.value[0].id
       sectionsList.value = classesList.value[0].sections || []
       if (sectionsList.value.length > 0) {
         selectedSectionId.value = sectionsList.value[0].id
         summarySectionId.value = sectionsList.value[0].id
-        await loadRoster()
+        await Promise.all([loadRoster(), fetchSummaryStudents()])
       }
     }
   } catch (err) {
@@ -151,6 +224,34 @@ watch(selectedClassId, (newClassId) => {
 watch(selectedSectionId, async () => {
   if (selectedSectionId.value) {
     await loadRoster()
+  }
+})
+
+watch(summaryClassId, (newClassId) => {
+  if (!newClassId) {
+    summarySectionId.value = ''
+    return
+  }
+  const cls = classesList.value.find((c) => c.id === Number(newClassId))
+  const secs = cls?.sections || []
+  if (secs.length > 0) {
+    if (!secs.some((s) => s.id === summarySectionId.value)) {
+      summarySectionId.value = secs[0].id
+    }
+  } else {
+    summarySectionId.value = ''
+  }
+})
+
+watch(summarySectionId, async (newSecId) => {
+  if (newSecId) {
+    await fetchSummaryStudents()
+    if (activeTab.value === 'reports') {
+      await fetchSummary()
+    }
+  } else {
+    summaryStudentsList.value = []
+    summaryData.value = null
   }
 })
 
@@ -340,7 +441,84 @@ async function handleSubmitCorrection() {
   }
 }
 
-// Analytics Tab
+// Analytics Tab Methods
+function formatHumanDate(dateStr?: string): string {
+  if (!dateStr) return ''
+  try {
+    const parts = dateStr.split('-')
+    if (parts.length === 3) {
+      const year = Number(parts[0])
+      const month = Number(parts[1]) - 1
+      const day = Number(parts[2])
+      const date = new Date(year, month, day)
+      return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+    }
+    return dateStr
+  } catch {
+    return dateStr
+  }
+}
+
+function setAnalyticsPreset(days: number) {
+  const now = new Date()
+  summaryEndDate.value = now.toISOString().substring(0, 10)
+  const past = new Date(Date.now() - days * 86400000)
+  summaryStartDate.value = past.toISOString().substring(0, 10)
+  fetchSummary()
+}
+
+function setAnalyticsMonthPreset() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  summaryStartDate.value = `${year}-${month}-01`
+  summaryEndDate.value = now.toISOString().substring(0, 10)
+  fetchSummary()
+}
+
+async function onOpenReportsTab() {
+  activeTab.value = 'reports'
+  if (!summaryClassId.value && selectedClassId.value) {
+    summaryClassId.value = selectedClassId.value
+  }
+  if (!summarySectionId.value && selectedSectionId.value) {
+    summarySectionId.value = selectedSectionId.value
+  }
+  if (summarySectionId.value) {
+    if (summaryStudentsList.value.length === 0) {
+      await fetchSummaryStudents()
+    }
+    await fetchSummary()
+  }
+}
+
+async function fetchSummaryStudents() {
+  if (!summarySectionId.value) {
+    summaryStudentsList.value = []
+    return
+  }
+  try {
+    summaryStudentsLoading.value = true
+    const res = await api.get('/api/v1/students', {
+      params: {
+        section_id: summarySectionId.value,
+        status: 'ACTIVE',
+        per_page: 100,
+      },
+    })
+    summaryStudentsList.value = (res.data.data || []).map((s: any, idx: number) => ({
+      id: s.id,
+      student_uid: s.student_uid,
+      name: s.name,
+      roll_number: s.enrollment?.roll_number || idx + 1,
+    }))
+  } catch (e) {
+    console.error('Failed to load summary section students', e)
+  } finally {
+    summaryStudentsLoading.value = false
+  }
+}
+
 async function fetchSummary() {
   if (!summarySectionId.value) return
   try {
@@ -361,19 +539,33 @@ async function fetchSummary() {
   }
 }
 
-async function searchStudentReport() {
-  if (!reportStudentId.value) return
+async function searchStudentReport(targetId?: string) {
+  const idToSearch = (targetId || reportStudentId.value || '').trim()
+  if (!idToSearch) return
+  reportStudentId.value = idToSearch
   try {
     studentReportLoading.value = true
-    const { data } = await api.get(`/api/v1/attendance/students/${reportStudentId.value}/report`, {
+    const { data } = await api.get(`/api/v1/attendance/students/${encodeURIComponent(idToSearch)}/report`, {
       params: { academic_year_id: currentSessionId.value },
     })
     studentReportData.value = data.data
+    if (data.data?.student?.student_uid) {
+      selectedDossierStudentUid.value = data.data.student.student_uid
+    }
   } catch (err: unknown) {
     const errorObj = err as { message?: string }
     notifyError('Report Error', errorObj.message || 'Could not load student report.')
   } finally {
     studentReportLoading.value = false
+  }
+}
+
+function onSelectDossierStudent(event: Event) {
+  const target = event.target as HTMLSelectElement
+  if (target.value) {
+    selectedDossierStudentUid.value = target.value
+    reportStudentId.value = target.value
+    searchStudentReport(target.value)
   }
 }
 
@@ -398,7 +590,7 @@ onMounted(async () => {
       <button class="tab-pill" :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'; fetchSessions(1)">
         <i class="pi pi-history mr-1"></i> Sessions Ledger & History
       </button>
-      <button class="tab-pill" :class="{ active: activeTab === 'reports' }" @click="activeTab = 'reports'; fetchSummary()">
+      <button class="tab-pill" :class="{ active: activeTab === 'reports' }" @click="onOpenReportsTab()">
         <i class="pi pi-chart-bar mr-1"></i> Summaries & Analytics
       </button>
     </div>
@@ -647,99 +839,439 @@ onMounted(async () => {
     </div>
 
     <!-- 3. Summaries & Analytics Panel -->
-    <div v-if="activeTab === 'reports'" class="flex flex-col gap-5">
-      <div class="table-card glass-panel">
-        <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
+    <div v-if="activeTab === 'reports'" class="flex flex-col gap-6">
+      <div class="table-card glass-panel flex flex-col gap-5">
+        <!-- Analytics Control & Date Presets Header -->
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
-            <h3 class="text-base font-bold text-slate-800">Section Attendance Analytics</h3>
-            <p class="text-xs text-slate-500">Aggregate presence percentage and absence trends</p>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-bold text-slate-800">Section Attendance Analytics</h3>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                Executive Dashboard
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Aggregate presence percentage, punctuality trends, and absenteeism audit across calendar dates</p>
           </div>
-          <div class="flex items-center gap-3.5 flex-wrap">
-            <select v-model="summarySectionId" class="custom-select h-10 text-xs px-3">
-              <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
-            <InputText v-model="summaryStartDate" type="date" class="p-inputtext-sm font-mono h-10 px-3 text-xs border border-slate-300 rounded-lg" />
-            <InputText v-model="summaryEndDate" type="date" class="p-inputtext-sm font-mono h-10 px-3 text-xs border border-slate-300 rounded-lg" />
-            <Button label="Calculate" icon="pi pi-chart-pie" size="small" class="brand-gradient-bg border-none h-10 px-4 font-semibold rounded-lg" :loading="summaryLoading" @click="fetchSummary" />
+
+          <!-- Quick Date Range Presets -->
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[11px] font-semibold text-slate-400 mr-0.5 uppercase tracking-wider">Presets:</span>
+            <button
+              type="button"
+              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              @click="setAnalyticsPreset(7)"
+            >
+              Last 7 Days
+            </button>
+            <button
+              type="button"
+              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              @click="setAnalyticsPreset(14)"
+            >
+              Last 14 Days
+            </button>
+            <button
+              type="button"
+              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              @click="setAnalyticsPreset(30)"
+            >
+              Last 30 Days
+            </button>
+            <button
+              type="button"
+              class="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition-colors shadow-2xs"
+              @click="setAnalyticsMonthPreset()"
+            >
+              This Month
+            </button>
           </div>
         </div>
 
-        <div v-if="summaryData" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
-          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-            <span class="text-xs text-slate-500 block">TOTAL SESSIONS</span>
-            <span class="font-bold text-lg text-slate-800">{{ summaryData.sessions_count }}</span>
+        <!-- Filter Inputs Bar (Grid with Class, Section, From Date, To Date, Calculate Button) -->
+        <div class="attendance-filter-bar grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4 p-3.5 sm:p-4 bg-slate-50/80 rounded-xl border border-slate-200/80 shadow-xs text-xs">
+          <FormField id="summary_class" label="Class / Grade Level" class="min-w-0 attendance-filter-col">
+            <select id="summary_class" v-model="summaryClassId" class="attendance-filter-input font-medium">
+              <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+          </FormField>
+
+          <FormField id="summary_section" label="Section / Arm" class="min-w-0 attendance-filter-col">
+            <select id="summary_section" v-model="summarySectionId" class="attendance-filter-input font-medium" :disabled="summarySectionsList.length === 0">
+              <option v-for="s in summarySectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+            </select>
+          </FormField>
+
+          <FormField id="summary_start_date" label="From Date" class="min-w-0 attendance-filter-col">
+            <input id="summary_start_date" v-model="summaryStartDate" type="date" class="attendance-filter-input font-mono" />
+          </FormField>
+
+          <FormField id="summary_end_date" label="To Date" class="min-w-0 attendance-filter-col">
+            <input id="summary_end_date" v-model="summaryEndDate" type="date" class="attendance-filter-input font-mono" />
+          </FormField>
+
+          <div class="min-w-0 flex flex-col justify-end attendance-filter-col">
+            <div class="attendance-filter-label-spacer"></div>
+            <Button
+              label="Analyze Attendance"
+              icon="pi pi-chart-pie"
+              class="brand-gradient-bg border-none attendance-filter-submit-btn"
+              :loading="summaryLoading"
+              @click="fetchSummary"
+            />
           </div>
-          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-            <span class="text-xs text-slate-500 block">TOTAL MARKED</span>
-            <span class="font-bold text-lg text-slate-800">{{ summaryData.total_marked }}</span>
+        </div>
+
+        <!-- Active Context & Executive Health Summary Banner -->
+        <div v-if="summaryData" class="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl">
+          <div class="flex items-center gap-3 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Analyzing:</span>
+              <span class="px-2.5 py-1 bg-white border border-slate-300 text-slate-800 text-xs font-bold rounded-md shadow-2xs">
+                {{ selectedSummaryClassName }} • {{ selectedSummarySectionName }}
+              </span>
+            </div>
+            <div class="flex items-center gap-1.5 text-xs text-slate-600">
+              <i class="pi pi-calendar text-slate-400"></i>
+              <span class="font-medium font-mono">{{ formatHumanDate(summaryData.start_date) }}</span>
+              <span class="text-slate-400">→</span>
+              <span class="font-medium font-mono">{{ formatHumanDate(summaryData.end_date) }}</span>
+            </div>
+            <span class="text-xs text-slate-300">|</span>
+            <span class="text-xs font-medium text-slate-600">
+              <strong class="text-slate-800">{{ summaryData.sessions_count }}</strong> Sessions Recorded ({{ summaryData.total_marked }} Student Check-ins)
+            </span>
           </div>
-          <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-            <span class="text-xs text-emerald-800 block">PRESENT</span>
-            <span class="font-bold text-lg text-emerald-800">{{ summaryData.present }}</span>
+
+          <!-- Health Rating Badge -->
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Section Health:</span>
+            <div
+              class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-2xs"
+              :class="analyticsBreakdown.colorClass"
+            >
+              <i
+                class="pi"
+                :class="{
+                  'pi-check-circle': analyticsBreakdown.rateStatus === 'OPTIMAL',
+                  'pi-exclamation-triangle': analyticsBreakdown.rateStatus === 'ACCEPTABLE',
+                  'pi-exclamation-circle': analyticsBreakdown.rateStatus === 'CRITICAL'
+                }"
+              ></i>
+              <span>{{ analyticsBreakdown.rateText }} ({{ summaryData.attendance_rate }}%)</span>
+            </div>
           </div>
-          <div class="p-3 bg-red-50 border border-red-200 rounded-xl">
-            <span class="text-xs text-red-800 block">ABSENT</span>
-            <span class="font-bold text-lg text-red-800">{{ summaryData.absent }}</span>
+        </div>
+
+        <!-- Visual Proportional Progress Breakdown Bar -->
+        <div v-if="summaryData && summaryData.total_marked > 0" class="flex flex-col gap-2.5 p-4 bg-white border border-slate-200/80 rounded-xl shadow-2xs">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-bold text-slate-700 flex items-center gap-1.5">
+              <i class="pi pi-sliders-h text-slate-400"></i> Proportional Attendance Distribution
+            </span>
+            <span class="text-slate-500 font-mono">{{ summaryData.total_marked }} total marked roll-calls</span>
           </div>
-          <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl">
-            <span class="text-xs text-amber-800 block">LATE</span>
-            <span class="font-bold text-lg text-amber-800">{{ summaryData.late }}</span>
+
+          <!-- Multi-segment stacked progress bar -->
+          <div class="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+            <div
+              v-if="analyticsBreakdown.presentPct > 0"
+              class="bg-emerald-500 hover:bg-emerald-600 transition-all duration-300 relative group cursor-pointer"
+              :style="{ width: `${analyticsBreakdown.presentPct}%` }"
+              :title="`Present: ${summaryData.present} (${analyticsBreakdown.presentPct}%)`"
+            ></div>
+            <div
+              v-if="analyticsBreakdown.latePct > 0"
+              class="bg-amber-400 hover:bg-amber-500 transition-all duration-300 relative group cursor-pointer"
+              :style="{ width: `${analyticsBreakdown.latePct}%` }"
+              :title="`Late: ${summaryData.late} (${analyticsBreakdown.latePct}%)`"
+            ></div>
+            <div
+              v-if="analyticsBreakdown.excusedPct > 0"
+              class="bg-sky-400 hover:bg-sky-500 transition-all duration-300 relative group cursor-pointer"
+              :style="{ width: `${analyticsBreakdown.excusedPct}%` }"
+              :title="`Excused & Leave: ${summaryData.excused + (summaryData.leave || 0)} (${analyticsBreakdown.excusedPct}%)`"
+            ></div>
+            <div
+              v-if="analyticsBreakdown.absentPct > 0"
+              class="bg-rose-500 hover:bg-rose-600 transition-all duration-300 relative group cursor-pointer"
+              :style="{ width: `${analyticsBreakdown.absentPct}%` }"
+              :title="`Absent: ${summaryData.absent} (${analyticsBreakdown.absentPct}%)`"
+            ></div>
           </div>
-          <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl">
-            <span class="text-xs text-blue-800 block">EXCUSED</span>
-            <span class="font-bold text-lg text-blue-800">{{ summaryData.excused }}</span>
+
+          <!-- Proportional Chips Legend -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+            <div class="flex items-center gap-2 p-2 bg-emerald-50/60 border border-emerald-200/60 rounded-lg">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+              <div class="flex flex-col min-w-0">
+                <span class="text-slate-600 font-medium">Present</span>
+                <span class="font-bold text-slate-800">{{ summaryData.present }} <span class="text-emerald-700 font-mono text-[11px]">({{ analyticsBreakdown.presentPct }}%)</span></span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 bg-amber-50/60 border border-amber-200/60 rounded-lg">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+              <div class="flex flex-col min-w-0">
+                <span class="text-slate-600 font-medium">Late Arrivals</span>
+                <span class="font-bold text-slate-800">{{ summaryData.late }} <span class="text-amber-700 font-mono text-[11px]">({{ analyticsBreakdown.latePct }}%)</span></span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 bg-sky-50/60 border border-sky-200/60 rounded-lg">
+              <span class="w-2.5 h-2.5 rounded-full bg-sky-400 shrink-0"></span>
+              <div class="flex flex-col min-w-0">
+                <span class="text-slate-600 font-medium">Excused / Leave</span>
+                <span class="font-bold text-slate-800">{{ summaryData.excused + (summaryData.leave || 0) }} <span class="text-sky-700 font-mono text-[11px]">({{ analyticsBreakdown.excusedPct }}%)</span></span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 bg-rose-50/60 border border-rose-200/60 rounded-lg">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+              <div class="flex flex-col min-w-0">
+                <span class="text-slate-600 font-medium">Absences</span>
+                <span class="font-bold text-slate-800">{{ summaryData.absent }} <span class="text-rose-700 font-mono text-[11px]">({{ analyticsBreakdown.absentPct }}%)</span></span>
+              </div>
+            </div>
           </div>
-          <div class="p-3 bg-emerald-500 text-white rounded-xl shadow-md">
-            <span class="text-xs block opacity-90">ATTENDANCE RATE</span>
-            <span class="font-black text-xl">{{ summaryData.attendance_rate }}%</span>
+        </div>
+
+        <!-- Executive KPI Metrics Grid -->
+        <div v-if="summaryData" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
+          <!-- 1. Hero KPI: Attendance Rate -->
+          <div class="p-4 bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-xl shadow-md sm:col-span-2 flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-xs font-semibold uppercase tracking-wider text-emerald-100 block">Overall Attendance Rate</span>
+                <span class="text-2xl sm:text-3xl font-black tracking-tight mt-1 block">{{ summaryData.attendance_rate }}%</span>
+              </div>
+              <div class="w-10 h-10 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+                <i class="pi pi-chart-line text-lg text-white"></i>
+              </div>
+            </div>
+            <div class="mt-3 pt-3 border-t border-white/20 text-xs text-emerald-100 flex items-center justify-between">
+              <span>{{ analyticsBreakdown.rateText }}</span>
+              <span class="font-mono text-white font-semibold">Min Target: 85%</span>
+            </div>
           </div>
+
+          <!-- 2. Present Count -->
+          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Present</span>
+              <div class="w-7 h-7 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <i class="pi pi-check text-xs"></i>
+              </div>
+            </div>
+            <div class="mt-2">
+              <span class="text-xl font-bold text-slate-800">{{ summaryData.present }}</span>
+              <span class="text-xs text-emerald-600 font-semibold block mt-0.5">{{ analyticsBreakdown.presentPct }}% of roster</span>
+            </div>
+            <span class="text-[11px] text-slate-400 mt-2 block">Physically in class</span>
+          </div>
+
+          <!-- 3. Late Count -->
+          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Late</span>
+              <div class="w-7 h-7 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center">
+                <i class="pi pi-clock text-xs"></i>
+              </div>
+            </div>
+            <div class="mt-2">
+              <span class="text-xl font-bold text-slate-800">{{ summaryData.late }}</span>
+              <span class="text-xs text-amber-600 font-semibold block mt-0.5">{{ analyticsBreakdown.latePct }}% of roster</span>
+            </div>
+            <span class="text-[11px] text-slate-400 mt-2 block">Post-bell arrivals</span>
+          </div>
+
+          <!-- 4. Absent Count -->
+          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Absent</span>
+              <div class="w-7 h-7 rounded-md bg-rose-50 text-rose-600 flex items-center justify-center">
+                <i class="pi pi-times text-xs"></i>
+              </div>
+            </div>
+            <div class="mt-2">
+              <span class="text-xl font-bold text-rose-700">{{ summaryData.absent }}</span>
+              <span class="text-xs text-rose-600 font-semibold block mt-0.5">{{ analyticsBreakdown.absentPct }}% of roster</span>
+            </div>
+            <span class="text-[11px] text-slate-400 mt-2 block">Unexcused missed</span>
+          </div>
+
+          <!-- 5. Excused & Leave -->
+          <div class="p-4 bg-white border border-slate-200/90 rounded-xl shadow-2xs flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Excused</span>
+              <div class="w-7 h-7 rounded-md bg-sky-50 text-sky-600 flex items-center justify-center">
+                <i class="pi pi-shield text-xs"></i>
+              </div>
+            </div>
+            <div class="mt-2">
+              <span class="text-xl font-bold text-slate-800">{{ summaryData.excused + (summaryData.leave || 0) }}</span>
+              <span class="text-xs text-sky-600 font-semibold block mt-0.5">{{ analyticsBreakdown.excusedPct }}% excused</span>
+            </div>
+            <span class="text-[11px] text-slate-400 mt-2 block">Approved leaves</span>
+          </div>
+        </div>
+
+        <!-- Loading & Empty States for Analytics -->
+        <div v-if="summaryLoading" class="py-8 text-center text-slate-500">
+          <i class="pi pi-spin pi-spinner text-xl mr-2 text-emerald-600"></i> Calculating section attendance metrics...
+        </div>
+        <div v-else-if="!summaryData" class="p-8 text-center bg-slate-50 border border-dashed border-slate-300 rounded-xl">
+          <i class="pi pi-chart-pie text-3xl text-slate-400 mb-2"></i>
+          <h4 class="text-sm font-bold text-slate-700">No Analytics Loaded Yet</h4>
+          <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">Select a Class, Section, and Date Range above, then click "Analyze Attendance" to generate the performance ledger.</p>
         </div>
       </div>
 
       <!-- Student Individual Attendance Dossier Lookup -->
-      <div class="table-card glass-panel">
-        <h3 class="text-base font-bold text-slate-800 mb-2">Individual Student Ledger Search</h3>
-        <div class="flex items-center gap-2 mb-4 max-w-md">
-          <InputText v-model="reportStudentId" placeholder="Enter Student Database ID (e.g. 1)" class="w-full p-inputtext-sm font-mono" />
-          <Button label="Search Ledger" icon="pi pi-search" size="small" class="brand-gradient-bg border-none" :loading="studentReportLoading" @click="searchStudentReport" />
+      <div class="table-card glass-panel flex flex-col gap-4">
+        <div class="flex justify-between items-start flex-wrap gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <h3 class="text-base font-bold text-slate-800">Individual Student Attendance Dossier</h3>
+            <p class="text-xs text-slate-500">Inspect granular daily attendance records, punctuality stamps, and audit correction logs for any student</p>
+          </div>
+          <div class="text-xs text-slate-400 flex items-center gap-1">
+            <i class="pi pi-info-circle"></i> Supports Student UID (e.g. STD-2026-6-0001) or Section Dropdown
+          </div>
         </div>
 
-        <div v-if="studentReportData" class="flex flex-col gap-4">
-          <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs">
-            <div>
-              <span class="font-bold text-slate-800 text-sm block">{{ studentReportData.student.name }} ({{ studentReportData.student.student_uid }})</span>
-              <span class="text-slate-500">{{ studentReportData.student.class }} • {{ studentReportData.student.section }} (Roll: {{ studentReportData.student.roll_number }})</span>
-            </div>
+        <!-- Search & Student Dropdown Bar -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+          <!-- Option A: Pick enrolled student from section -->
+          <FormField id="student_select_dropdown" label="Select Enrolled Student (From Active Section)">
+            <select
+              id="student_select_dropdown"
+              v-model="selectedDossierStudentUid"
+              class="attendance-filter-input font-medium"
+              :disabled="summaryStudentsList.length === 0 || summaryStudentsLoading"
+              @change="onSelectDossierStudent"
+            >
+              <option value="">-- Choose student from {{ selectedSummarySectionName || 'section' }} --</option>
+              <option
+                v-for="st in summaryStudentsList"
+                :key="st.id"
+                :value="st.student_uid"
+              >
+                Roll #{{ st.roll_number }} — {{ st.name }} ({{ st.student_uid }})
+              </option>
+            </select>
+          </FormField>
+
+          <!-- Option B: Direct Search by UID or ID -->
+          <FormField id="student_direct_search" label="Or Enter Student UID / Database ID">
             <div class="flex items-center gap-2">
-              <Tag :value="`Total Days: ${studentReportData.summary.total_working_days}`" severity="secondary" />
-              <Tag :value="`Attendance: ${studentReportData.summary.attendance_rate}%`" severity="success" class="font-bold" />
+              <InputText
+                id="student_direct_search"
+                v-model="reportStudentId"
+                placeholder="e.g. STD-2026-6-0001 or 1"
+                class="w-full font-mono text-xs border border-slate-300 rounded-lg h-9 px-3"
+                @keyup.enter="searchStudentReport()"
+              />
+              <Button
+                label="Search"
+                icon="pi pi-search"
+                size="small"
+                class="brand-gradient-bg border-none h-9 px-4 font-semibold rounded-lg shrink-0"
+                :loading="studentReportLoading"
+                @click="searchStudentReport()"
+              />
+            </div>
+          </FormField>
+        </div>
+
+        <!-- Student Dossier Report Display -->
+        <div v-if="studentReportData" class="flex flex-col gap-4">
+          <!-- Student Header & Key Metrics -->
+          <div class="p-4 bg-gradient-to-r from-slate-50 to-emerald-50/30 border border-slate-200 rounded-xl flex items-center justify-between flex-wrap gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-11 h-11 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                {{ studentReportData.student.name?.charAt(0) || 'S' }}
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-bold text-slate-800 text-sm">{{ studentReportData.student.name }}</span>
+                  <span class="font-mono text-xs bg-slate-200/80 text-slate-700 px-2 py-0.5 rounded font-medium">{{ studentReportData.student.student_uid }}</span>
+                </div>
+                <span class="text-xs text-slate-500 block mt-0.5">
+                  {{ studentReportData.student.class }} • {{ studentReportData.student.section }} &nbsp;|&nbsp; Roll Number: <strong>#{{ studentReportData.student.roll_number }}</strong>
+                </span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-center shadow-2xs">
+                <span class="text-[10px] text-slate-400 uppercase font-bold block">Working Days</span>
+                <span class="font-bold text-slate-800 text-sm">{{ studentReportData.summary.total_working_days }}</span>
+              </div>
+              <div class="px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-center shadow-2xs">
+                <span class="text-[10px] text-emerald-600 uppercase font-bold block">Present</span>
+                <span class="font-bold text-emerald-800 text-sm">{{ studentReportData.summary.present }}</span>
+              </div>
+              <div class="px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-center shadow-2xs">
+                <span class="text-[10px] text-rose-600 uppercase font-bold block">Absent</span>
+                <span class="font-bold text-rose-800 text-sm">{{ studentReportData.summary.absent }}</span>
+              </div>
+              <div class="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-center shadow-2xs">
+                <span class="text-[10px] text-amber-600 uppercase font-bold block">Late</span>
+                <span class="font-bold text-amber-800 text-sm">{{ studentReportData.summary.late }}</span>
+              </div>
+              <div class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-center shadow-sm">
+                <span class="text-[10px] text-emerald-100 uppercase font-bold block">Attendance</span>
+                <span class="font-black text-sm">{{ studentReportData.summary.attendance_rate }}%</span>
+              </div>
             </div>
           </div>
 
-          <div class="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-            <table class="w-full text-left text-xs">
-              <thead class="bg-slate-100 text-slate-600 font-semibold sticky top-0">
-                <tr>
-                  <th class="p-2">Date</th>
-                  <th class="p-2">Mode</th>
-                  <th class="p-2">Status</th>
-                  <th class="p-2">Check-in</th>
-                  <th class="p-2">Remarks / Correction</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-200">
-                <tr v-for="rec in studentReportData.records" :key="rec.id">
-                  <td class="p-2 font-mono font-bold">{{ rec.date }}</td>
-                  <td class="p-2 text-slate-600">{{ rec.type }}</td>
-                  <td class="p-2">
-                    <StatusBadge :status="rec.status" size="small" />
-                  </td>
-                  <td class="p-2 font-mono">{{ rec.check_in_time || 'N/A' }}</td>
-                  <td class="p-2 text-slate-600">{{ rec.correction_reason || rec.remarks || '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
+          <!-- Historical Attendance Table -->
+          <div class="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+            <div class="p-2.5 bg-slate-100/80 border-b border-slate-200 text-xs font-semibold text-slate-600 flex justify-between items-center">
+              <span>Historical Attendance Ledger ({{ studentReportData.records?.length || 0 }} records)</span>
+              <span class="text-slate-400 font-normal">Ordered by most recent date</span>
+            </div>
+            <div class="max-h-72 overflow-y-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-600 font-semibold sticky top-0 border-b border-slate-200">
+                  <tr>
+                    <th class="p-2.5">Date</th>
+                    <th class="p-2.5">Mode</th>
+                    <th class="p-2.5">Status</th>
+                    <th class="p-2.5">Check-in Time</th>
+                    <th class="p-2.5">Remarks / Audit Note</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr v-for="rec in studentReportData.records" :key="rec.id" class="hover:bg-slate-50/70 transition-colors">
+                    <td class="p-2.5 font-mono font-bold text-slate-700">{{ rec.date }}</td>
+                    <td class="p-2.5 text-slate-600">
+                      <span class="px-2 py-0.5 rounded text-[11px] bg-slate-100 font-medium text-slate-600">
+                        {{ rec.type === 'DAILY_HOMEROOM' ? 'Daily Homeroom' : (rec.period || 'Period') }}
+                      </span>
+                    </td>
+                    <td class="p-2.5">
+                      <StatusBadge :status="rec.status" size="small" />
+                    </td>
+                    <td class="p-2.5 font-mono text-slate-600">{{ rec.check_in_time || '—' }}</td>
+                    <td class="p-2.5 text-slate-600">
+                      <span v-if="rec.correction_reason" class="text-amber-700 font-medium">
+                        <i class="pi pi-pencil text-[10px] mr-1"></i>{{ rec.correction_reason }}
+                      </span>
+                      <span v-else-if="rec.remarks">{{ rec.remarks }}</span>
+                      <span v-else class="text-slate-300">—</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
+        </div>
+
+        <!-- Empty state for dossier -->
+        <div v-else-if="!studentReportLoading" class="p-6 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-500">
+          <i class="pi pi-user text-2xl text-slate-300 mb-1"></i>
+          <p class="text-xs font-medium">Select a student from the dropdown or search by Student UID to view their complete attendance ledger.</p>
         </div>
       </div>
     </div>
@@ -1018,6 +1550,29 @@ input[type="date"].attendance-filter-input {
   background-color: #f8fafc !important;
   border-color: #94a3b8 !important;
   color: #0f172a !important;
+}
+
+.attendance-filter-submit-btn {
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  width: 100% !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  border-radius: 0.5rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.4rem !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.08) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+.attendance-filter-submit-btn:hover {
+  opacity: 0.95;
+  transform: translateY(-0.5px);
 }
 
 .status-btn-group {
