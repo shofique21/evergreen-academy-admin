@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import PageHeader from '@/components/common/PageHeader.vue'
@@ -81,7 +81,27 @@ const loading = ref(false)
 const sessions = ref<AcademicSessionRow[]>([])
 const classStructures = ref<ClassStructureRow[]>([])
 const subjectsList = ref<SubjectItem[]>([])
+const selectedSubjectClass = ref<number | ''>('')
+const filteredSubjectsList = computed(() => {
+  const list = Array.isArray(subjectsList.value) ? subjectsList.value : []
+  if (!selectedSubjectClass.value) return list
+  return list.filter((s) => s.class_id === Number(selectedSubjectClass.value))
+})
 const roomsList = ref<ClassroomItem[]>([])
+const selectedBuilding = ref<string>('')
+const filteredRoomsList = computed(() => {
+  const list = Array.isArray(roomsList.value) ? roomsList.value : []
+  if (!selectedBuilding.value) return list
+  return list.filter((r) => r.building_name === selectedBuilding.value)
+})
+const uniqueBuildings = computed(() => {
+  const set = new Set<string>()
+  const list = Array.isArray(roomsList.value) ? roomsList.value : []
+  list.forEach((r) => {
+    if (r.building_name) set.add(r.building_name)
+  })
+  return Array.from(set)
+})
 const shiftsList = ref<ShiftItem[]>([])
 const mediumsList = ref<MediumItem[]>([])
 const currentSession = ref<{ id: number; name: string } | null>(null)
@@ -215,9 +235,9 @@ async function fetchAcademicData() {
     shiftsList.value = res.shifts || []
     mediumsList.value = res.mediums || []
 
-    sessions.value = yearsRes.data.data || res.academic_years || []
-    subjectsList.value = subjectsRes.data.data || []
-    roomsList.value = roomsRes.data.data || []
+    sessions.value = Array.isArray(yearsRes.data.data) ? yearsRes.data.data : (res.academic_years || [])
+    subjectsList.value = Array.isArray(subjectsRes.data.data) ? subjectsRes.data.data : []
+    roomsList.value = Array.isArray(roomsRes.data.data) ? roomsRes.data.data : []
 
     classStructures.value = (res.classes || []).map((c: any) => ({
       id: c.id,
@@ -898,16 +918,36 @@ onMounted(() => {
           <h3 class="card-title">Curricular Subjects Registry</h3>
           <p class="card-subtitle">Course units, mark weighting, practical requirements, and elective classifications</p>
         </div>
-        <Button
-          label="Add Subject"
-          icon="pi pi-plus"
-          size="small"
-          class="brand-gradient-bg border-none"
-          @click="openAddSubjectModal()"
-        />
+        <div class="flex items-center gap-2">
+          <select
+            v-model="selectedSubjectClass"
+            class="custom-select text-xs h-9 px-3"
+            aria-label="Filter by Class"
+          >
+            <option value="">All Classes ({{ subjectsList.length }})</option>
+            <option v-for="c in classStructures" :key="c.id" :value="c.id">
+              {{ c.grade }}
+            </option>
+          </select>
+          <Button
+            label="Add Subject"
+            icon="pi pi-plus"
+            size="small"
+            class="brand-gradient-bg border-none"
+            @click="openAddSubjectModal()"
+          />
+        </div>
       </div>
 
-      <DataTable :value="subjectsList" :loading="loading" responsiveLayout="scroll" class="p-datatable-sm custom-table">
+      <DataTable
+        :value="filteredSubjectsList"
+        :loading="loading"
+        :paginator="true"
+        :rows="15"
+        :rowsPerPageOptions="[10, 15, 25, 50]"
+        responsiveLayout="scroll"
+        class="p-datatable-sm custom-table"
+      >
         <Column field="code" header="Subject Code" style="width: 130px">
           <template #body="{ data }">
             <span class="font-mono font-bold text-slate-700">{{ data.code }}</span>
@@ -980,16 +1020,36 @@ onMounted(() => {
           <h3 class="card-title">Classrooms & Laboratories</h3>
           <p class="card-subtitle">Physical campus infrastructure, computer labs, science labs, and auditoriums</p>
         </div>
-        <Button
-          label="Register Room"
-          icon="pi pi-plus"
-          size="small"
-          class="brand-gradient-bg border-none"
-          @click="openAddRoomModal()"
-        />
+        <div class="flex items-center gap-2">
+          <select
+            v-model="selectedBuilding"
+            class="custom-select text-xs h-9 px-3"
+            aria-label="Filter by Building"
+          >
+            <option value="">All Buildings ({{ roomsList.length }})</option>
+            <option v-for="b in uniqueBuildings" :key="b" :value="b">
+              {{ b }}
+            </option>
+          </select>
+          <Button
+            label="Register Room"
+            icon="pi pi-plus"
+            size="small"
+            class="brand-gradient-bg border-none"
+            @click="openAddRoomModal()"
+          />
+        </div>
       </div>
 
-      <DataTable :value="roomsList" :loading="loading" responsiveLayout="scroll" class="p-datatable-sm custom-table">
+      <DataTable
+        :value="filteredRoomsList"
+        :loading="loading"
+        :paginator="true"
+        :rows="15"
+        :rowsPerPageOptions="[10, 15, 25, 50]"
+        responsiveLayout="scroll"
+        class="p-datatable-sm custom-table"
+      >
         <Column field="room_number" header="Room Number">
           <template #body="{ data }">
             <span class="font-mono font-bold text-emerald-700">{{ data.room_number }}</span>
@@ -1888,44 +1948,44 @@ onMounted(() => {
             <button
               type="button"
               class="preset-btn"
-              @click="applySubjectPreset('Bangla', 'BAN-101', false, 'COMPULSORY')"
+              @click="applySubjectPreset('Bangla 1st Paper', 'BAN-101', false, 'COMPULSORY')"
             >
-              Bangla
+              BAN-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applySubjectPreset('English', 'ENG-102', false, 'COMPULSORY')"
+              @click="applySubjectPreset('English 1st Paper', 'ENG-101', false, 'COMPULSORY')"
             >
-              English
+              ENG-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applySubjectPreset('Mathematics', 'MTH-103', false, 'COMPULSORY')"
+              @click="applySubjectPreset('Mathematics', 'MTH-101', false, 'COMPULSORY')"
             >
-              Mathematics
+              MTH-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applySubjectPreset('Physics', 'PHY-105', true, 'ELECTIVE')"
+              @click="applySubjectPreset('Physics', 'PHY-101', true, 'ELECTIVE')"
             >
-              Physics
+              PHY-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applySubjectPreset('Chemistry', 'CHM-106', true, 'ELECTIVE')"
+              @click="applySubjectPreset('Chemistry', 'CHM-101', true, 'ELECTIVE')"
             >
-              Chemistry
+              CHM-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applySubjectPreset('ICT', 'ICT-107', true, 'COMPULSORY')"
+              @click="applySubjectPreset('Information & Communication Technology', 'ICT-101', true, 'COMPULSORY')"
             >
-              ICT
+              ICT-101
             </button>
           </div>
         </FormField>
@@ -1939,7 +1999,7 @@ onMounted(() => {
                 id="sub_code"
                 v-model="subjectForm.code"
                 type="text"
-                placeholder="e.g. PHY-101"
+                placeholder="e.g. ENG-101, BAN-101"
                 class="clean-input font-mono uppercase"
                 required
               />
@@ -2135,44 +2195,44 @@ onMounted(() => {
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditSubjectPreset('Bangla', 'BAN-101', false, 'COMPULSORY')"
+              @click="applyEditSubjectPreset('Bangla 1st Paper', 'BAN-101', false, 'COMPULSORY')"
             >
-              Bangla
+              BAN-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditSubjectPreset('English', 'ENG-102', false, 'COMPULSORY')"
+              @click="applyEditSubjectPreset('English 1st Paper', 'ENG-101', false, 'COMPULSORY')"
             >
-              English
+              ENG-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditSubjectPreset('Mathematics', 'MTH-103', false, 'COMPULSORY')"
+              @click="applyEditSubjectPreset('Mathematics', 'MTH-101', false, 'COMPULSORY')"
             >
-              Mathematics
+              MTH-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditSubjectPreset('Physics', 'PHY-105', true, 'ELECTIVE')"
+              @click="applyEditSubjectPreset('Physics', 'PHY-101', true, 'ELECTIVE')"
             >
-              Physics
+              PHY-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditSubjectPreset('Chemistry', 'CHM-106', true, 'ELECTIVE')"
+              @click="applyEditSubjectPreset('Chemistry', 'CHM-101', true, 'ELECTIVE')"
             >
-              Chemistry
+              CHM-101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditSubjectPreset('ICT', 'ICT-107', true, 'COMPULSORY')"
+              @click="applyEditSubjectPreset('Information & Communication Technology', 'ICT-101', true, 'COMPULSORY')"
             >
-              ICT
+              ICT-101
             </button>
           </div>
         </FormField>
@@ -2186,7 +2246,7 @@ onMounted(() => {
                 id="edit_sub_code"
                 v-model="editSubjectForm.code"
                 type="text"
-                placeholder="e.g. PHY-101"
+                placeholder="e.g. ENG-101, BAN-101"
                 class="clean-input font-mono uppercase"
                 required
               />
@@ -2364,8 +2424,8 @@ onMounted(() => {
               id="rm_no"
               v-model="roomForm.room_number"
               type="text"
-              placeholder="e.g. Room-101, Lab-302, Aud-1"
-              class="clean-input font-mono font-bold uppercase"
+              placeholder="e.g. Room 101, Room 201"
+              class="clean-input font-mono font-bold"
               required
             />
           </div>
@@ -2374,44 +2434,51 @@ onMounted(() => {
             <button
               type="button"
               class="preset-btn"
-              @click="applyRoomPreset('Room 101', 'CLASSROOM', 45)"
+              @click="applyRoomPreset('Room 101', 'CLASSROOM', 45, 'Nazrul Bhaban (Building 1)')"
             >
               Room 101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyRoomPreset('Room 201', 'CLASSROOM', 45)"
+              @click="applyRoomPreset('Room 201', 'CLASSROOM', 45, 'Nazrul Bhaban (Building 1)')"
             >
               Room 201
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyRoomPreset('Physics Lab', 'LAB_PHYSICS', 40, 'Science Block')"
+              @click="applyRoomPreset('Room 301', 'CLASSROOM', 50, 'Nazrul Bhaban (Building 1)')"
             >
-              Physics Lab
+              Room 301
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyRoomPreset('Chemistry Lab', 'LAB_CHEMISTRY', 40, 'Science Block')"
+              @click="applyRoomPreset('Room 401', 'CLASSROOM', 50, 'Rabindra Bhaban (Building 2)')"
             >
-              Chemistry Lab
+              Room 401
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyRoomPreset('ICT Lab', 'LAB_ICT', 40, 'ICT Complex')"
+              @click="applyRoomPreset('Room 701', 'LAB_ICT', 45, 'Dr. Qudrat-i-Khuda STEM Complex (Building 3)')"
             >
-              ICT Lab
+              Room 701 (ICT Lab)
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyRoomPreset('Auditorium Hall', 'AUDITORIUM', 150, 'Main Academic Complex')"
+              @click="applyRoomPreset('Room 706', 'LAB_PHYSICS', 40, 'Dr. Qudrat-i-Khuda STEM Complex (Building 3)')"
             >
-              Auditorium
+              Room 706 (Physics Lab)
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyRoomPreset('Room 801', 'AUDITORIUM', 450, 'Dr. Qudrat-i-Khuda STEM Complex (Building 3)')"
+            >
+              Room 801 (Auditorium)
             </button>
           </div>
         </FormField>
@@ -2590,8 +2657,8 @@ onMounted(() => {
               id="edit_rm_no"
               v-model="editRoomForm.room_number"
               type="text"
-              placeholder="e.g. Room-101, Lab-302, Aud-1"
-              class="clean-input font-mono font-bold uppercase"
+              placeholder="e.g. Room 101, Room 201"
+              class="clean-input font-mono font-bold"
               required
             />
           </div>
@@ -2600,44 +2667,51 @@ onMounted(() => {
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditRoomPreset('Room 101', 'CLASSROOM', 45)"
+              @click="applyEditRoomPreset('Room 101', 'CLASSROOM', 45, 'Nazrul Bhaban (Building 1)')"
             >
               Room 101
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditRoomPreset('Room 201', 'CLASSROOM', 45)"
+              @click="applyEditRoomPreset('Room 201', 'CLASSROOM', 45, 'Nazrul Bhaban (Building 1)')"
             >
               Room 201
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditRoomPreset('Physics Lab', 'LAB_PHYSICS', 40, 'Science Block')"
+              @click="applyEditRoomPreset('Room 301', 'CLASSROOM', 50, 'Nazrul Bhaban (Building 1)')"
             >
-              Physics Lab
+              Room 301
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditRoomPreset('Chemistry Lab', 'LAB_CHEMISTRY', 40, 'Science Block')"
+              @click="applyEditRoomPreset('Room 401', 'CLASSROOM', 50, 'Rabindra Bhaban (Building 2)')"
             >
-              Chemistry Lab
+              Room 401
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditRoomPreset('ICT Lab', 'LAB_ICT', 40, 'ICT Complex')"
+              @click="applyEditRoomPreset('Room 701', 'LAB_ICT', 45, 'Dr. Qudrat-i-Khuda STEM Complex (Building 3)')"
             >
-              ICT Lab
+              Room 701 (ICT Lab)
             </button>
             <button
               type="button"
               class="preset-btn"
-              @click="applyEditRoomPreset('Auditorium Hall', 'AUDITORIUM', 150, 'Main Academic Complex')"
+              @click="applyEditRoomPreset('Room 706', 'LAB_PHYSICS', 40, 'Dr. Qudrat-i-Khuda STEM Complex (Building 3)')"
             >
-              Auditorium
+              Room 706 (Physics Lab)
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('Room 801', 'AUDITORIUM', 450, 'Dr. Qudrat-i-Khuda STEM Complex (Building 3)')"
+            >
+              Room 801 (Auditorium)
             </button>
           </div>
         </FormField>

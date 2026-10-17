@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import PageHeader from '@/components/common/PageHeader.vue'
@@ -119,6 +119,38 @@ const admissionForm = ref({
     occupation: '',
   },
 })
+
+const activeSessionName = computed(() => {
+  const current = academicYearsList.value.find((y) => y.id === currentSessionId.value)
+  return current ? current.name : 'Current Academic Session (2026–2027)'
+})
+
+function resetAdmissionForm() {
+  admissionForm.value = {
+    campus_id: 1,
+    academic_year_id: currentSessionId.value || 1,
+    class_id: '',
+    section_id: '',
+    roll_number: '',
+    first_name: '',
+    last_name: '',
+    date_of_birth: '',
+    gender: 'MALE',
+    blood_group: 'A+',
+    religion: 'Islam',
+    emergency_phone: '',
+    present_address: '',
+    opening_balance_arrears: 0,
+    guardian: {
+      name: '',
+      phone: '',
+      email: '',
+      relationship: 'FATHER',
+      occupation: '',
+    },
+  }
+  admissionErrors.value = {}
+}
 
 // Student Details & History Modal
 const detailsDialogVisible = ref(false)
@@ -791,17 +823,16 @@ onMounted(async () => {
           <template #body="{ data }">
             <button
               type="button"
-              class="group flex items-center gap-1.5 p-1 -m-1 rounded-lg hover:bg-slate-100 transition-all cursor-pointer border border-transparent hover:border-slate-200"
+              class="cursor-pointer border-0 bg-transparent p-0 transition-transform hover:scale-105"
               title="Click to change student institutional status"
               @click="openStatusModal(data)"
             >
               <StatusBadge :status="data.status" showDot />
-              <i class="pi pi-pencil text-[10px] text-slate-400 group-hover:text-slate-700 opacity-60 group-hover:opacity-100 transition-opacity"></i>
             </button>
           </template>
         </Column>
 
-        <Column header="Actions" style="width: 175px" alignFrozen="right">
+        <Column header="Actions" style="width: 140px" alignFrozen="right">
           <template #body="{ data }">
             <div class="flex items-center gap-1">
               <Button
@@ -812,15 +843,6 @@ onMounted(async () => {
                 aria-label="View Student Profile"
                 v-tooltip.top="'View Profile & History'"
                 @click="handleViewStudent(data.id)"
-              />
-              <Button
-                icon="pi pi-user-edit"
-                text
-                rounded
-                severity="warn"
-                aria-label="Change Status"
-                v-tooltip.top="'Change Student Status'"
-                @click="openStatusModal(data)"
               />
               <Button
                 v-if="data.status === 'ACTIVE'"
@@ -852,12 +874,12 @@ onMounted(async () => {
     <Dialog
       v-model:visible="detailsDialogVisible"
       modal
-      :style="{ width: '880px', maxWidth: '96vw' }"
-      class="student-profile-dialog"
+      :style="{ width: '840px', maxWidth: '96vw' }"
+      class="student-details-dialog"
     >
       <template #header>
         <div v-if="selectedStudent" class="modal-header-banner w-full">
-          <div class="student-avatar-lg">
+          <div class="applicant-avatar">
             {{ getInitials(selectedStudent.first_name ? `${selectedStudent.first_name} ${selectedStudent.last_name || ''}` : selectedStudent.name) }}
           </div>
           <div class="modal-header-text flex-1 min-w-0">
@@ -865,7 +887,7 @@ onMounted(async () => {
               <h2 class="modal-title font-bold text-slate-900 text-lg tracking-tight">
                 {{ selectedStudent.first_name ? `${selectedStudent.first_name} ${selectedStudent.last_name || ''}`.trim() : selectedStudent.name }}
               </h2>
-              <span class="student-uid-badge font-mono font-bold text-xs" title="Click to copy UID" @click="copyToClipboard(selectedStudent.student_uid)">
+              <span class="ref-badge font-mono font-bold text-xs cursor-pointer" title="Click to copy UID" @click="copyToClipboard(selectedStudent.student_uid)">
                 <i class="pi pi-copy text-[10px] mr-1"></i>{{ selectedStudent.student_uid }}
               </span>
               <button
@@ -875,9 +897,7 @@ onMounted(async () => {
                 @click="openStatusModal(selectedStudent)"
               >
                 <StatusBadge :status="selectedStudent.status" size="small" showDot />
-                <span class="text-[10px] text-slate-500 group-hover:text-slate-900 font-semibold uppercase flex items-center gap-0.5">
-                  <i class="pi pi-pencil text-[9px]"></i>Change
-                </span>
+                <span class="text-[10px] text-slate-500 group-hover:text-slate-900 font-semibold uppercase">Change</span>
               </button>
             </div>
             <p class="modal-subtitle text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
@@ -893,7 +913,7 @@ onMounted(async () => {
           </div>
         </div>
         <div v-else class="modal-header-banner">
-          <div class="student-avatar-lg"><i class="pi pi-user text-xl"></i></div>
+          <div class="applicant-avatar"><i class="pi pi-user text-xl"></i></div>
           <div class="modal-header-text">
             <h2 class="modal-title font-bold text-slate-900 text-lg">Student Profile</h2>
             <p class="modal-subtitle text-xs text-slate-500">Official SIS Student Dossier</p>
@@ -906,168 +926,131 @@ onMounted(async () => {
         <span class="text-xs font-semibold tracking-wide uppercase text-slate-400">Loading student dossier...</span>
       </div>
 
-      <div v-else-if="selectedStudent" class="student-dossier-body flex flex-col gap-5 pt-2 pb-2 max-h-[75vh] overflow-y-auto px-1">
-        <!-- Top Snapshot Cards Row -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      <div v-else-if="selectedStudent" class="details-modal-body">
+        <!-- Top Snapshot Cards Row (Admissions summary-cards-grid) -->
+        <div class="summary-cards-grid">
           <!-- Tile 1: Class & Section -->
-          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
-            <div class="flex items-center justify-between text-slate-400 mb-2">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <i class="pi pi-book text-emerald-600 text-xs"></i> Class & Section
-              </span>
-              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-            </div>
-            <div class="text-base font-bold text-slate-900 truncate">
+          <div class="summary-card">
+            <span class="summary-label flex items-center gap-1">
+              <i class="pi pi-book text-emerald-600 text-xs"></i> Class & Section
+            </span>
+            <span class="summary-val font-bold text-slate-900 truncate">
               {{ selectedStudent.enrollment?.class || 'Unassigned Grade' }}
-            </div>
-            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
-              <span v-if="selectedStudent.enrollment?.section" class="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
-                Section: {{ selectedStudent.enrollment.section }}
+              <span v-if="selectedStudent.enrollment?.section" class="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                {{ selectedStudent.enrollment.section }}
               </span>
-              <span class="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-800 font-mono font-bold text-xs">
-                Roll #{{ selectedStudent.enrollment?.roll_number ?? '—' }}
+              <span class="font-mono font-bold text-slate-700 text-xs">
+                #{{ selectedStudent.enrollment?.roll_number ?? '—' }}
               </span>
-            </div>
+            </span>
           </div>
 
           <!-- Tile 2: Academic Session -->
-          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
-            <div class="flex items-center justify-between text-slate-400 mb-2">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <i class="pi pi-calendar text-teal-600 text-xs"></i> Academic Session
-              </span>
-              <span class="w-2 h-2 rounded-full bg-teal-500"></span>
-            </div>
-            <div class="text-base font-bold text-slate-900 truncate" :title="selectedStudent.enrollment?.session">
+          <div class="summary-card">
+            <span class="summary-label flex items-center gap-1">
+              <i class="pi pi-calendar text-teal-600 text-xs"></i> Academic Session
+            </span>
+            <span class="summary-val font-semibold text-slate-800 truncate" :title="selectedStudent.enrollment?.session">
               {{ selectedStudent.enrollment?.session || 'Current Academic Year' }}
-            </div>
-            <div class="flex items-center gap-2 mt-2 text-xs text-slate-600 flex-wrap">
-              <span class="px-2 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-teal-800 font-medium text-xs">
-                {{ selectedStudent.enrollment?.shift || 'Morning' }} Shift
-              </span>
-              <span class="text-slate-300">&bull;</span>
-              <span class="text-slate-600 font-medium">{{ selectedStudent.enrollment?.medium || 'Bangla' }} Medium</span>
-            </div>
+              <span class="text-xs text-slate-500 font-normal">({{ selectedStudent.enrollment?.shift || 'Day' }} • {{ selectedStudent.enrollment?.medium || 'Bangla' }})</span>
+            </span>
           </div>
 
           <!-- Tile 3: Demographics -->
-          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
-            <div class="flex items-center justify-between text-slate-400 mb-2">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <i class="pi pi-user text-blue-600 text-xs"></i> Demographics
+          <div class="summary-card">
+            <span class="summary-label flex items-center gap-1">
+              <i class="pi pi-user text-blue-600 text-xs"></i> Demographics
+            </span>
+            <span class="summary-val font-medium text-slate-800">
+              {{ selectedStudent.gender || '—' }} • {{ selectedStudent.religion || 'Islam' }}
+              <span v-if="selectedStudent.blood_group" class="text-rose-600 font-bold ml-1 font-mono">
+                ({{ selectedStudent.blood_group }})
               </span>
-              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-            </div>
-            <div class="text-base font-bold text-slate-900 flex items-center gap-2">
-              <span>{{ selectedStudent.gender || '—' }}</span>
-              <span class="text-slate-300 font-normal">|</span>
-              <span class="text-sm font-semibold text-slate-700">{{ selectedStudent.religion || 'Islam' }}</span>
-            </div>
-            <div class="mt-2 flex items-center gap-1.5">
-              <span v-if="selectedStudent.blood_group" class="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1">
-                <i class="pi pi-heart-fill text-[9px] text-rose-500"></i> Blood Group: {{ selectedStudent.blood_group }}
-              </span>
-              <span v-else class="text-xs text-slate-400">Blood Group: N/A</span>
-            </div>
+            </span>
           </div>
 
           <!-- Tile 4: Opening Arrears -->
-          <div class="snapshot-tile bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs flex flex-col justify-between">
-            <div class="flex items-center justify-between text-slate-400 mb-2">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <i class="pi pi-wallet text-amber-600 text-xs"></i> Opening Arrears
-              </span>
-              <span class="w-2 h-2 rounded-full" :class="(selectedStudent.enrollment?.arrears_balance || 0) > 0 ? 'bg-amber-500' : 'bg-emerald-500'"></span>
-            </div>
-            <div class="text-base font-mono font-extrabold text-slate-900">
+          <div class="summary-card">
+            <span class="summary-label flex items-center gap-1">
+              <i class="pi pi-wallet text-amber-600 text-xs"></i> Opening Arrears
+            </span>
+            <span class="summary-val font-mono font-bold" :class="(selectedStudent.enrollment?.arrears_balance || 0) > 0 ? 'text-amber-700' : 'text-emerald-700'">
               ৳ {{ Number(selectedStudent.enrollment?.arrears_balance || 0).toLocaleString() }}
-            </div>
-            <div class="mt-2">
-              <span
-                v-if="(selectedStudent.enrollment?.arrears_balance || 0) > 0"
-                class="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold"
-              >
-                Unpaid Prior Dues
+              <span v-if="(selectedStudent.enrollment?.arrears_balance || 0) === 0" class="text-xs font-sans font-medium text-emerald-600">
+                (Clear)
               </span>
-              <span
-                v-else
-                class="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-1 w-fit"
-              >
-                <i class="pi pi-check text-[10px]"></i> Clear / Zero Balance
-              </span>
-            </div>
+            </span>
           </div>
         </div>
 
         <!-- Section 1: Detailed Bio & Residence Information -->
-        <div class="profile-card border border-slate-200/90 rounded-xl p-5 bg-white shadow-xs">
-          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 flex-wrap gap-2">
-            <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-2">
-              <i class="pi pi-id-card text-emerald-600 text-sm"></i> Personal & Institutional Details
-            </h4>
-            <span class="text-xs text-slate-400 font-medium bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200/70">
-              Registered on: <strong class="text-slate-700 font-mono">{{ formatDate(selectedStudent.created_at) }}</strong>
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-id-card text-emerald-600"></i>
+            <span>Personal & Institutional Details</span>
+            <span class="ml-auto text-xs text-slate-400 font-normal">
+              Registered: <strong class="text-slate-700 font-mono">{{ formatDate(selectedStudent.created_at) }}</strong>
             </span>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 text-xs">
-            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
-              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Date of Birth</span>
-              <div class="font-mono font-bold text-slate-900 text-sm flex items-center gap-2 flex-wrap">
-                <span>{{ formatDate(selectedStudent.date_of_birth) }}</span>
-                <span v-if="selectedStudent.date_of_birth" class="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 font-sans font-medium text-xs">
-                  {{ calculateAge(selectedStudent.date_of_birth) }}
+          <div class="detail-data-grid">
+            <div class="data-item">
+              <span class="data-label">Date of Birth</span>
+              <span class="data-val font-mono font-bold text-slate-900">
+                {{ formatDate(selectedStudent.date_of_birth) }}
+                <span v-if="selectedStudent.date_of_birth" class="ml-1 text-xs text-slate-500 font-sans font-normal">
+                  ({{ calculateAge(selectedStudent.date_of_birth) }})
                 </span>
-              </div>
-            </div>
-
-            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
-              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Emergency Phone</span>
-              <div>
-                <a
-                  v-if="selectedStudent.emergency_phone"
-                  :href="'tel:' + selectedStudent.emergency_phone"
-                  class="font-mono font-bold text-emerald-700 hover:text-emerald-800 hover:underline text-sm flex items-center gap-1.5"
-                >
-                  <i class="pi pi-phone text-xs"></i> {{ selectedStudent.emergency_phone }}
-                </a>
-                <span v-else class="text-slate-400 font-medium">Not Registered</span>
-              </div>
-            </div>
-
-            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
-              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Institutional Status</span>
-              <div class="mt-0.5 flex items-center justify-between gap-2">
-                <StatusBadge :status="selectedStudent.status" size="small" showDot />
-                <button
-                  type="button"
-                  class="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 hover:underline cursor-pointer"
-                  @click="openStatusModal(selectedStudent)"
-                >
-                  <i class="pi pi-user-edit text-[11px]"></i> Edit Status
-                </button>
-              </div>
-            </div>
-
-            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
-              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Campus Facility</span>
-              <span class="text-slate-900 font-semibold text-sm flex items-center gap-1.5">
-                <i class="pi pi-building text-slate-400 text-xs"></i> Main Academy Campus
               </span>
             </div>
 
-            <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center sm:col-span-2">
-              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Present Residence</span>
-              <span class="text-slate-800 text-sm leading-relaxed flex items-start gap-1.5 font-medium">
-                <i class="pi pi-home text-slate-400 text-xs mt-1 shrink-0"></i>
+            <div class="data-item">
+              <span class="data-label">Emergency Phone</span>
+              <span class="data-val font-mono font-bold">
+                <a
+                  v-if="selectedStudent.emergency_phone"
+                  :href="'tel:' + selectedStudent.emergency_phone"
+                  class="text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1.5"
+                >
+                  <i class="pi pi-phone text-xs"></i> {{ selectedStudent.emergency_phone }}
+                </a>
+                <span v-else class="text-slate-400 font-normal font-sans">Not Registered</span>
+              </span>
+            </div>
+
+            <div class="data-item">
+              <span class="data-label">Institutional Status</span>
+              <span class="data-val flex items-center gap-2">
+                <StatusBadge :status="selectedStudent.status" size="small" showDot />
+                <button
+                  type="button"
+                  class="text-xs text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                  @click="openStatusModal(selectedStudent)"
+                >
+                  <i class="pi pi-user-edit text-[11px]"></i> Edit
+                </button>
+              </span>
+            </div>
+
+            <div class="data-item">
+              <span class="data-label">Campus Facility</span>
+              <span class="data-val">
+                <i class="pi pi-building text-slate-400 text-xs mr-1"></i> Main Academy Campus
+              </span>
+            </div>
+
+            <div class="data-item col-span-2">
+              <span class="data-label">Present Residence</span>
+              <span class="data-val">
+                <i class="pi pi-home text-slate-400 text-xs mr-1 shrink-0"></i>
                 {{ selectedStudent.present_address || 'Address not registered' }}
               </span>
             </div>
 
-            <div v-if="selectedStudent.permanent_address && selectedStudent.permanent_address !== selectedStudent.present_address" class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center sm:col-span-2 md:col-span-3">
-              <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Permanent Address</span>
-              <span class="text-slate-700 text-sm leading-relaxed flex items-start gap-1.5">
-                <i class="pi pi-map-marker text-slate-400 text-xs mt-1 shrink-0"></i>
+            <div v-if="selectedStudent.permanent_address && selectedStudent.permanent_address !== selectedStudent.present_address" class="data-item col-span-3">
+              <span class="data-label">Permanent Address</span>
+              <span class="data-val">
+                <i class="pi pi-map-marker text-slate-400 text-xs mr-1 shrink-0"></i>
                 {{ selectedStudent.permanent_address }}
               </span>
             </div>
@@ -1075,18 +1058,12 @@ onMounted(async () => {
         </div>
 
         <!-- Section 2: Academic Enrollment History (Immutable Ledger) -->
-        <div class="profile-card border border-slate-200/90 rounded-xl p-5 bg-white shadow-xs">
-          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 flex-wrap gap-2">
-            <div>
-              <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-2">
-                <i class="pi pi-history text-emerald-600 text-sm"></i> Academic Enrollment History
-              </h4>
-              <p class="text-xs text-slate-500 mt-1">
-                Immutable institutional ledger &bull; Records and historical marks are permanently preserved
-              </p>
-            </div>
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <i class="pi pi-lock text-[10px]"></i> Immutable Ledger
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-history text-emerald-600"></i>
+            <span>Academic Enrollment History</span>
+            <span class="ml-auto inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <i class="pi pi-lock text-[9px]"></i> Immutable Ledger
             </span>
           </div>
 
@@ -1136,29 +1113,23 @@ onMounted(async () => {
         </div>
 
         <!-- Section 3: Guardians & Authorized Contacts -->
-        <div class="profile-card border border-slate-200/90 rounded-xl p-5 bg-white shadow-xs">
-          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 flex-wrap gap-2">
-            <div>
-              <h4 class="text-xs uppercase font-bold tracking-wider text-slate-700 flex items-center gap-2">
-                <i class="pi pi-shield text-emerald-600 text-sm"></i> Guardians & Family Contacts
-              </h4>
-              <p class="text-xs text-slate-500 mt-1">
-                Authorized family representatives receiving attendance SMS, report cards, and fee invoices
-              </p>
-            </div>
+        <div class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-shield text-emerald-600"></i>
+            <span>Guardians & Family Contacts</span>
             <Button
               :label="showAddGuardian ? 'Close Form' : 'Link Another Guardian'"
               :icon="showAddGuardian ? 'pi pi-times' : 'pi pi-plus'"
               size="small"
               :severity="showAddGuardian ? 'secondary' : 'success'"
               outlined
-              class="text-xs font-semibold px-3.5 py-1.5 h-auto"
+              class="ml-auto text-xs font-semibold px-3 py-1 h-auto"
               @click="showAddGuardian = !showAddGuardian"
             />
           </div>
 
           <!-- Add Guardian Inline Form -->
-          <div v-if="showAddGuardian" class="p-4 mb-4 bg-gradient-to-r from-emerald-50/70 to-teal-50/70 rounded-xl border border-emerald-200 flex flex-col gap-3.5">
+          <div v-if="showAddGuardian" class="p-4 mb-2 bg-gradient-to-r from-emerald-50/70 to-teal-50/70 rounded-xl border border-emerald-200 flex flex-col gap-3.5">
             <div class="flex items-center justify-between">
               <span class="text-xs font-bold text-emerald-900 flex items-center gap-2">
                 <i class="pi pi-user-plus text-emerald-600"></i> Register & Link New Guardian
@@ -1280,25 +1251,23 @@ onMounted(async () => {
         </div>
 
         <!-- Dialog Footer Actions -->
-        <div class="flex items-center justify-between pt-4 mt-2 border-t border-slate-200">
+        <div class="intake-form-footer">
           <div class="flex items-center gap-2 text-xs text-slate-500 font-mono">
             <span class="text-slate-400">Institutional UID:</span>
             <strong class="text-slate-800 font-bold bg-slate-100 px-2.5 py-1 rounded border border-slate-200">{{ selectedStudent.student_uid }}</strong>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2.5">
             <Button
               label="Change Status"
               icon="pi pi-user-edit"
               severity="warn"
               outlined
-              class="px-4 py-2 font-semibold text-xs rounded-lg"
               @click="openStatusModal(selectedStudent)"
             />
             <Button
               label="Close Profile"
               severity="secondary"
               outlined
-              class="px-6 py-2 font-semibold text-xs rounded-lg"
               @click="detailsDialogVisible = false"
             />
           </div>
@@ -1310,27 +1279,30 @@ onMounted(async () => {
     <Dialog
       v-model:visible="transferDialogVisible"
       modal
-      :style="{ width: '600px', maxWidth: '96vw' }"
-      class="clean-workflow-dialog"
+      :style="{ width: '680px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
     >
       <template #header>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 shadow-xs">
-            <i class="pi pi-arrows-h text-lg"></i>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); color: #047857; border-color: #a7f3d0;">
+            <i class="pi pi-arrows-h"></i>
           </div>
-          <div>
-            <h3 class="text-base font-bold text-slate-800 leading-snug">Execute Student Transfer Workflow</h3>
-            <p class="text-xs text-slate-500">Reassign section or process institutional transfer-out clearance</p>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Execute Student Transfer Workflow</h2>
+              <span class="badge-intake">Clearance & Transfer</span>
+            </div>
+            <p class="modal-subtitle">Reassign classroom section or process institutional transfer-out clearance</p>
           </div>
         </div>
       </template>
 
-      <form v-if="transferTargetStudent" @submit.prevent="handleExecuteTransfer" class="flex flex-col gap-5 pt-2">
-        <!-- Student Identity & Placement Header -->
-        <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+      <form v-if="transferTargetStudent" @submit.prevent="handleExecuteTransfer" class="intake-form-body">
+        <!-- Student Placement Snapshot Card -->
+        <div class="form-section-card">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-xs">
                 {{ getInitials(transferTargetStudent.name) }}
               </div>
               <div class="min-w-0">
@@ -1339,9 +1311,7 @@ onMounted(async () => {
                 </h4>
                 <div class="flex items-center gap-2 mt-0.5">
                   <span class="font-mono text-xs text-slate-500 font-medium">UID: {{ transferTargetStudent.student_uid }}</span>
-                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-emerald-100 text-emerald-800">
-                    {{ transferTargetStudent.status }}
-                  </span>
+                  <StatusBadge :status="transferTargetStudent.status" size="small" showDot />
                 </div>
               </div>
             </div>
@@ -1351,13 +1321,13 @@ onMounted(async () => {
                 class="text-xs font-bold font-mono"
                 :class="(transferTargetStudent.enrollment?.arrears_balance || 0) > 0 ? 'text-amber-600' : 'text-emerald-700'"
               >
-                ৳ {{ transferTargetStudent.enrollment?.arrears_balance || 0 }}
+                ৳ {{ Number(transferTargetStudent.enrollment?.arrears_balance || 0).toLocaleString() }}
               </span>
             </div>
           </div>
 
-          <!-- Current Academic Placement Pills -->
-          <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/80 text-xs">
+          <!-- Current Placement Data Grid -->
+          <div class="grid grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/80 text-xs">
             <div class="bg-white rounded-lg p-2.5 border border-slate-200">
               <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Grade / Class</span>
               <span class="font-bold text-slate-800">{{ transferTargetStudent.enrollment?.class || '—' }}</span>
@@ -1373,11 +1343,16 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Transfer Workflow Type Selection Cards -->
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
-            Select Transfer Workflow Type <span class="text-red-500">*</span>
-          </label>
+        <!-- Section 1: Transfer Workflow Type Selection -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">1</span>
+            <div>
+              <h3 class="section-heading">Transfer Workflow Type</h3>
+              <p class="section-desc">Designate intra-class section movement or external institutional departure</p>
+            </div>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <!-- Option 1: Intra-Class Section Reassignment -->
             <div
@@ -1447,35 +1422,37 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Section Reassignment Parameters (when SECTION_TRANSFER) -->
-        <div v-if="transferForm.type === 'SECTION_TRANSFER'" class="space-y-3.5 bg-emerald-50/40 rounded-xl p-4 border border-emerald-100">
-          <div class="flex items-center justify-between pb-2 border-b border-emerald-200/60">
-            <span class="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-              <i class="pi pi-sliders-h text-emerald-600"></i> New Section & Roll Assignment
-            </span>
-            <span class="text-[11px] text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
-              Grade: <strong>{{ transferTargetStudent.enrollment?.class }}</strong>
-            </span>
+        <!-- Section 2: Reassignment Parameters or Departure Protocol -->
+        <div v-if="transferForm.type === 'SECTION_TRANSFER'" class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">2</span>
+            <div>
+              <h3 class="section-heading">Target Section & Roll Assignment</h3>
+              <p class="section-desc">Assign student to another arm within Grade {{ transferTargetStudent.enrollment?.class }}</p>
+            </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+          <div class="form-grid grid-2">
             <FormField id="target_section" label="Target Section" required>
-              <select id="target_section" v-model="transferForm.target_section_id" class="clean-select w-full" required>
-                <option value="" disabled>Select Target Section</option>
-                <option
-                  v-for="sec in transferSectionsList"
-                  :key="sec.id"
-                  :value="sec.id"
-                  :disabled="sec.name === transferTargetStudent.enrollment?.section"
-                >
-                  Section {{ sec.name }} {{ sec.name === transferTargetStudent.enrollment?.section ? '(Current)' : '' }}
-                </option>
-              </select>
+              <div class="clean-field-wrap">
+                <i class="pi pi-th-large field-icon"></i>
+                <select id="target_section" v-model="transferForm.target_section_id" class="clean-select" required>
+                  <option value="" disabled>Select Target Section</option>
+                  <option
+                    v-for="sec in transferSectionsList"
+                    :key="sec.id"
+                    :value="sec.id"
+                    :disabled="sec.name === transferTargetStudent.enrollment?.section"
+                  >
+                    Section {{ sec.name }} {{ sec.name === transferTargetStudent.enrollment?.section ? '(Current)' : '' }}
+                  </option>
+                </select>
+              </div>
             </FormField>
 
             <FormField id="new_roll" label="New Roll Number in Target Section" required>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-sm">#</span>
+              <div class="clean-field-wrap">
+                <i class="pi pi-hashtag field-icon"></i>
                 <input
                   id="new_roll"
                   v-model.number="transferForm.new_roll"
@@ -1483,7 +1460,7 @@ onMounted(async () => {
                   min="1"
                   max="500"
                   placeholder="e.g. 5"
-                  class="clean-input w-full font-mono font-bold pl-7"
+                  class="clean-input font-mono font-bold"
                   required
                 />
               </div>
@@ -1492,28 +1469,40 @@ onMounted(async () => {
         </div>
 
         <!-- Transfer Out Explanatory Protocol (when TRANSFER_OUT) -->
-        <div v-else-if="transferForm.type === 'TRANSFER_OUT'" class="bg-blue-50/70 rounded-xl p-4 border border-blue-200/80 space-y-2">
-          <div class="flex items-center gap-2 text-blue-900 font-bold text-xs uppercase tracking-wider">
-            <i class="pi pi-shield text-blue-600"></i>
-            <span>Institutional Departure Protocol</span>
+        <div v-else-if="transferForm.type === 'TRANSFER_OUT'" class="form-section-card bg-blue-50/50 border-blue-200">
+          <div class="section-title-row border-blue-200/70">
+            <span class="section-num bg-blue-600">2</span>
+            <div>
+              <h3 class="section-heading text-blue-950">Institutional Departure Protocol</h3>
+              <p class="section-desc text-blue-800">Clearance rules for student records and seat vacancy</p>
+            </div>
           </div>
-          <ul class="text-xs text-blue-900/90 space-y-1 pl-4 list-disc leading-relaxed">
+
+          <ul class="text-xs text-blue-900/90 space-y-1.5 pl-4 list-disc leading-relaxed">
             <li>Student status will transition to <strong class="font-bold text-blue-950">TRANSFERRED_OUT</strong>.</li>
             <li>Releases current seat in Section <strong>{{ transferTargetStudent.enrollment?.section }}</strong>.</li>
             <li>Historical marks, transcripts, and financial records remain permanently preserved in the immutable ledger.</li>
           </ul>
         </div>
 
-        <!-- Reason / Administrative Remarks with Suggestion Buttons -->
-        <div class="space-y-3">
-          <!-- Preset Transfer Reason Buttons Grid -->
-          <div class="bg-slate-50/90 rounded-xl p-3.5 border border-slate-200/90 space-y-2.5">
+        <!-- Section 3: Reason / Administrative Remarks with Suggestion Buttons -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">3</span>
+            <div>
+              <h3 class="section-heading">Clearance Reason & Remarks</h3>
+              <p class="section-desc">Record rationale on student audit trail for official verification</p>
+            </div>
+          </div>
+
+          <!-- Preset Reason Suggestions -->
+          <div class="space-y-2">
             <div class="flex items-center justify-between">
               <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 <i class="pi pi-bolt text-emerald-600"></i>
                 Preset Reason Suggestions
               </span>
-              <span class="text-[11px] text-slate-500 font-medium">Click a button to auto-fill</span>
+              <span class="text-[11px] text-slate-500 font-medium">Click to auto-fill</span>
             </div>
 
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -1538,26 +1527,22 @@ onMounted(async () => {
 
           <!-- Reason Input -->
           <FormField id="transfer_reason" label="Reason for Transfer / Administrative Remarks" required>
-            <div class="relative">
-              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <i class="pi pi-comment text-xs"></i>
-              </span>
-              <InputText
+            <div class="clean-field-wrap">
+              <i class="pi pi-comment field-icon"></i>
+              <input
                 id="transfer_reason"
                 v-model="transferForm.reason"
                 placeholder="Select a suggestion above or enter specific reason..."
-                class="w-full font-medium pl-8"
+                class="clean-input"
                 required
               />
             </div>
-            <div class="flex items-center justify-between mt-1">
-              <span class="text-[11px] text-slate-400">
-                Selected preset can be edited or customized with additional details.
-              </span>
+            <div class="flex items-center justify-between mt-1 text-[11px] text-slate-400">
+              <span>Selected preset can be edited or customized with additional details.</span>
               <button
                 v-if="transferForm.reason"
                 type="button"
-                class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium hover:underline"
+                class="text-emerald-600 hover:text-emerald-700 font-medium hover:underline"
                 @click="transferForm.reason = ''"
               >
                 Clear field
@@ -1567,20 +1552,27 @@ onMounted(async () => {
         </div>
 
         <!-- Footer Actions -->
-        <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
-          <Button
-            label="Cancel"
-            severity="secondary"
-            text
-            @click="transferDialogVisible = false"
-          />
-          <Button
-            type="submit"
-            :label="transferForm.type === 'SECTION_TRANSFER' ? 'Confirm Section Transfer' : 'Execute Transfer Out'"
-            :icon="transferForm.type === 'SECTION_TRANSFER' ? 'pi pi-check' : 'pi pi-external-link'"
-            :loading="transferring"
-            :class="transferForm.type === 'SECTION_TRANSFER' ? 'brand-gradient-bg border-none' : 'bg-blue-600 hover:bg-blue-700 text-white border-none'"
-          />
+        <div class="intake-form-footer">
+          <div class="flex items-center gap-2 text-xs text-slate-500 font-mono">
+            <span>UID:</span>
+            <strong class="text-slate-800 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{{ transferTargetStudent.student_uid }}</strong>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button
+              type="button"
+              label="Cancel"
+              severity="secondary"
+              outlined
+              @click="transferDialogVisible = false"
+            />
+            <Button
+              type="submit"
+              :label="transferForm.type === 'SECTION_TRANSFER' ? 'Confirm Section Transfer' : 'Execute Transfer Out'"
+              :icon="transferForm.type === 'SECTION_TRANSFER' ? 'pi pi-check' : 'pi pi-external-link'"
+              :loading="transferring"
+              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
         </div>
       </form>
     </Dialog>
@@ -1589,27 +1581,30 @@ onMounted(async () => {
     <Dialog
       v-model:visible="withdrawDialogVisible"
       modal
-      :style="{ width: '580px', maxWidth: '96vw' }"
-      class="clean-workflow-dialog"
+      :style="{ width: '640px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
     >
       <template #header>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 shadow-xs">
-            <i class="pi pi-user-minus text-lg"></i>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon" style="background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%); color: #e11d48; border-color: #fecdd3;">
+            <i class="pi pi-user-minus"></i>
           </div>
-          <div>
-            <h3 class="text-base font-bold text-slate-800 leading-snug">Record Student Withdrawal</h3>
-            <p class="text-xs text-slate-500">Record formal institutional departure and archive enrollment</p>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Record Student Withdrawal</h2>
+              <span class="badge-intake" style="background: #fff1f2; color: #be123c; border-color: #fecdd3;">Exit Clearance</span>
+            </div>
+            <p class="modal-subtitle">Record formal institutional departure and archive enrollment</p>
           </div>
         </div>
       </template>
 
-      <form v-if="withdrawTargetStudent" @submit.prevent="handleExecuteWithdraw" class="flex flex-col gap-5 pt-2">
-        <!-- Student Identity & Placement Header -->
-        <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+      <form v-if="withdrawTargetStudent" @submit.prevent="handleExecuteWithdraw" class="intake-form-body">
+        <!-- Student Placement Snapshot Card -->
+        <div class="form-section-card">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-10 h-10 rounded-full bg-slate-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-slate-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-xs">
                 {{ getInitials(withdrawTargetStudent.name) }}
               </div>
               <div class="min-w-0">
@@ -1618,9 +1613,7 @@ onMounted(async () => {
                 </h4>
                 <div class="flex items-center gap-2 mt-0.5">
                   <span class="font-mono text-xs text-slate-500 font-medium">UID: {{ withdrawTargetStudent.student_uid }}</span>
-                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-emerald-100 text-emerald-800">
-                    {{ withdrawTargetStudent.status }}
-                  </span>
+                  <StatusBadge :status="withdrawTargetStudent.status" size="small" showDot />
                 </div>
               </div>
             </div>
@@ -1647,101 +1640,100 @@ onMounted(async () => {
                   : 'Financial Clearance: Zero Outstanding Balance' }}
               </span>
             </div>
-            <span class="font-bold font-mono text-sm">৳ {{ withdrawTargetStudent.enrollment?.arrears_balance || 0 }}</span>
+            <span class="font-bold font-mono text-sm">৳ {{ Number(withdrawTargetStudent.enrollment?.arrears_balance || 0).toLocaleString() }}</span>
           </div>
         </div>
 
         <!-- Institutional Record Notice -->
-        <div class="p-3.5 bg-rose-50 text-rose-950 rounded-xl border border-rose-200 text-xs space-y-1.5">
-          <div class="flex items-center gap-2 font-bold text-rose-800 uppercase tracking-wider text-[11px]">
+        <div class="form-section-card bg-rose-50/60 border-rose-200">
+          <div class="flex items-center gap-2 font-bold text-rose-800 uppercase tracking-wider text-[11px] pb-1 border-b border-rose-200/70">
             <i class="pi pi-exclamation-triangle text-rose-600"></i>
             <span>Institutional Audit Protocol</span>
           </div>
-          <p class="leading-relaxed text-rose-900">
+          <p class="text-xs leading-relaxed text-rose-900">
             Withdrawing permanently transitions the student status to <strong class="font-bold">INACTIVE</strong> and archives current enrollment as <strong class="font-bold">WITHDRAWN</strong>.
             All historical marks, attendance, and transcripts remain preserved in the immutable ledger.
           </p>
         </div>
 
         <!-- Inputs: Exit Date and Reason -->
-        <div class="space-y-4">
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num bg-rose-700">1</span>
+            <div>
+              <h3 class="section-heading">Exit Date & Clearance Reason</h3>
+              <p class="section-desc">Official withdrawal particulars recorded on clearance certificate</p>
+            </div>
+          </div>
+
           <FormField id="exit_date" label="Official Withdrawal / Exit Date" required>
-            <div class="relative">
-              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <i class="pi pi-calendar text-xs"></i>
-              </span>
-              <InputText
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar field-icon"></i>
+              <input
                 id="exit_date"
                 v-model="withdrawForm.exit_date"
                 type="date"
-                class="w-full font-mono pl-8"
+                class="clean-input font-mono"
                 required
               />
             </div>
             <span class="text-[11px] text-slate-400 mt-1 block">Official date recorded on transfer clearance certificates.</span>
           </FormField>
 
-          <!-- Reason Selection & Input -->
-          <div class="space-y-3">
-            <!-- Preset Reason Suggestion Buttons Grid -->
-            <div class="bg-slate-50/90 rounded-xl p-3.5 border border-slate-200/90 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <i class="pi pi-bolt text-rose-600"></i>
-                  Preset Reason Suggestions
-                </span>
-                <span class="text-[11px] text-slate-500 font-medium">Click a button to auto-fill</span>
-              </div>
-
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <button
-                  v-for="sug in withdrawSuggestionsList"
-                  :key="sug.label"
-                  type="button"
-                  class="suggestion-btn flex items-center justify-between p-2.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer border text-left"
-                  :class="withdrawForm.reason === sug.label
-                    ? 'bg-rose-50 border-rose-500 text-rose-950 font-bold ring-2 ring-rose-500/25 shadow-xs'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 hover:border-slate-400 shadow-xs'"
-                  @click="selectWithdrawSuggestion(sug.label)"
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <i :class="[sug.icon, withdrawForm.reason === sug.label ? 'text-rose-600' : sug.color, 'text-sm shrink-0']"></i>
-                    <span class="truncate">{{ sug.label }}</span>
-                  </div>
-                  <i v-if="withdrawForm.reason === sug.label" class="pi pi-check text-rose-600 text-xs shrink-0 font-bold"></i>
-                </button>
-              </div>
+          <!-- Preset Reason Suggestions -->
+          <div class="space-y-2 pt-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <i class="pi pi-bolt text-rose-600"></i>
+                Preset Reason Suggestions
+              </span>
+              <span class="text-[11px] text-slate-500 font-medium">Click to auto-fill</span>
             </div>
 
-            <!-- Reason Input / Remarks -->
-            <FormField id="withdraw_reason" label="Reason for Departure / Withdrawal" required>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  <i class="pi pi-comment text-xs"></i>
-                </span>
-                <InputText
-                  id="withdraw_reason"
-                  v-model="withdrawForm.reason"
-                  placeholder="Select a suggestion button above or enter specific reason..."
-                  class="w-full font-medium pl-8"
-                  required
-                />
-              </div>
-              <div class="flex items-center justify-between mt-1">
-                <span class="text-[11px] text-slate-400">
-                  Selected preset can be edited or customized with additional details.
-                </span>
-                <button
-                  v-if="withdrawForm.reason"
-                  type="button"
-                  class="text-[11px] text-rose-600 hover:text-rose-700 font-medium hover:underline"
-                  @click="withdrawForm.reason = ''"
-                >
-                  Clear field
-                </button>
-              </div>
-            </FormField>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <button
+                v-for="sug in withdrawSuggestionsList"
+                :key="sug.label"
+                type="button"
+                class="suggestion-btn flex items-center justify-between p-2.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer border text-left"
+                :class="withdrawForm.reason === sug.label
+                  ? 'bg-rose-50 border-rose-500 text-rose-950 font-bold ring-2 ring-rose-500/25 shadow-xs'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 hover:border-slate-400 shadow-xs'"
+                @click="selectWithdrawSuggestion(sug.label)"
+              >
+                <div class="flex items-center gap-2 min-w-0">
+                  <i :class="[sug.icon, withdrawForm.reason === sug.label ? 'text-rose-600' : sug.color, 'text-sm shrink-0']"></i>
+                  <span class="truncate">{{ sug.label }}</span>
+                </div>
+                <i v-if="withdrawForm.reason === sug.label" class="pi pi-check text-rose-600 text-xs shrink-0 font-bold"></i>
+              </button>
+            </div>
           </div>
+
+          <!-- Reason Input / Remarks -->
+          <FormField id="withdraw_reason" label="Reason for Departure / Withdrawal" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-comment field-icon"></i>
+              <input
+                id="withdraw_reason"
+                v-model="withdrawForm.reason"
+                placeholder="Select a suggestion button above or enter specific reason..."
+                class="clean-input"
+                required
+              />
+            </div>
+            <div class="flex items-center justify-between mt-1 text-[11px] text-slate-400">
+              <span>Selected preset can be edited or customized with additional details.</span>
+              <button
+                v-if="withdrawForm.reason"
+                type="button"
+                class="text-rose-600 hover:text-rose-700 font-medium hover:underline"
+                @click="withdrawForm.reason = ''"
+              >
+                Clear field
+              </button>
+            </div>
+          </FormField>
 
           <!-- Clearance Confirmation Checkbox -->
           <label class="flex items-start gap-2.5 cursor-pointer p-3 rounded-lg border border-slate-200 bg-slate-50/60 hover:bg-slate-50 text-xs transition-colors">
@@ -1757,20 +1749,28 @@ onMounted(async () => {
         </div>
 
         <!-- Footer Actions -->
-        <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
-          <Button
-            label="Cancel"
-            severity="secondary"
-            text
-            @click="withdrawDialogVisible = false"
-          />
-          <Button
-            type="submit"
-            label="Confirm & Process Withdrawal"
-            icon="pi pi-user-minus"
-            severity="danger"
-            :loading="withdrawing"
-          />
+        <div class="intake-form-footer">
+          <div class="flex items-center gap-2 text-xs text-slate-500 font-mono">
+            <span>UID:</span>
+            <strong class="text-slate-800 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{{ withdrawTargetStudent.student_uid }}</strong>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button
+              type="button"
+              label="Cancel"
+              severity="secondary"
+              outlined
+              @click="withdrawDialogVisible = false"
+            />
+            <Button
+              type="submit"
+              label="Confirm & Process Withdrawal"
+              icon="pi pi-user-minus"
+              severity="danger"
+              :loading="withdrawing"
+              class="px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
         </div>
       </form>
     </Dialog>
@@ -1779,27 +1779,30 @@ onMounted(async () => {
     <Dialog
       v-model:visible="statusDialogVisible"
       modal
-      :style="{ width: '620px', maxWidth: '96vw' }"
-      class="clean-workflow-dialog"
+      :style="{ width: '640px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
     >
       <template #header>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 shadow-xs">
-            <i class="pi pi-user-edit text-lg"></i>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon" style="background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%); color: #4338ca; border-color: #c7d2fe;">
+            <i class="pi pi-user-edit"></i>
           </div>
-          <div>
-            <h3 class="text-base font-bold text-slate-800 leading-snug">Change Student Institutional Status</h3>
-            <p class="text-xs text-slate-500">Modify active standing, reinstate, or record formal departure</p>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Change Student Institutional Status</h2>
+              <span class="badge-intake" style="background: #eef2ff; color: #4338ca; border-color: #c7d2fe;">Lifecycle Status</span>
+            </div>
+            <p class="modal-subtitle">Modify institutional standing, reinstate, or record formal departure</p>
           </div>
         </div>
       </template>
 
-      <form v-if="statusTargetStudent" @submit.prevent="handleUpdateStatus" class="flex flex-col gap-5 pt-2">
+      <form v-if="statusTargetStudent" @submit.prevent="handleUpdateStatus" class="intake-form-body">
         <!-- Student Summary Card -->
-        <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+        <div class="form-section-card">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-10 h-10 rounded-full bg-slate-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-slate-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-xs">
                 {{ getInitials(statusTargetStudent.name) }}
               </div>
               <div class="min-w-0">
@@ -1822,10 +1825,15 @@ onMounted(async () => {
         </div>
 
         <!-- Select New Status Section -->
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2.5">
-            Select New Institutional Status <span class="text-red-500">*</span>
-          </label>
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num bg-indigo-600">1</span>
+            <div>
+              <h3 class="section-heading">Target Institutional Standing</h3>
+              <p class="section-desc">Select the updated lifecycle state for this student</p>
+            </div>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div
               v-for="opt in statusOptionsList"
@@ -1866,17 +1874,23 @@ onMounted(async () => {
         </div>
 
         <!-- Optional Reason / Remarks -->
-        <div class="space-y-2">
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num bg-indigo-600">2</span>
+            <div>
+              <h3 class="section-heading">Administrative Remarks & Audit Reason</h3>
+              <p class="section-desc">Log justification for audit trail</p>
+            </div>
+          </div>
+
           <FormField id="status_remarks" label="Reason for Status Change / Administrative Note">
-            <div class="relative">
-              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <i class="pi pi-comment text-xs"></i>
-              </span>
-              <InputText
+            <div class="clean-field-wrap">
+              <i class="pi pi-comment field-icon"></i>
+              <input
                 id="status_remarks"
                 v-model="statusForm.remarks"
                 placeholder="e.g. Resumed studies after medical leave, granted transfer certificate..."
-                class="w-full font-medium pl-8"
+                class="clean-input"
               />
             </div>
           </FormField>
@@ -1899,20 +1913,27 @@ onMounted(async () => {
         </div>
 
         <!-- Footer Actions -->
-        <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
-          <Button
-            label="Cancel"
-            severity="secondary"
-            text
-            @click="statusDialogVisible = false"
-          />
-          <Button
-            type="submit"
-            label="Save Status Changes"
-            icon="pi pi-check"
-            :loading="updatingStatus"
-            class="brand-gradient-bg border-none px-6 py-2"
-          />
+        <div class="intake-form-footer">
+          <div class="flex items-center gap-2 text-xs text-slate-500 font-mono">
+            <span>UID:</span>
+            <strong class="text-slate-800 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{{ statusTargetStudent.student_uid }}</strong>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button
+              type="button"
+              label="Cancel"
+              severity="secondary"
+              outlined
+              @click="statusDialogVisible = false"
+            />
+            <Button
+              type="submit"
+              label="Save Status Changes"
+              icon="pi pi-check"
+              :loading="updatingStatus"
+              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
         </div>
       </form>
     </Dialog>
@@ -1921,119 +1942,173 @@ onMounted(async () => {
     <Dialog
       v-model:visible="promoteDialogVisible"
       modal
-      header="Batch Student Promotion Workflow"
-      :style="{ width: '780px', maxWidth: '95vw' }"
+      :style="{ width: '840px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
     >
-      <div class="flex flex-col gap-4 pt-2">
-        <div class="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-900">
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #b45309; border-color: #fcd34d;">
+            <i class="pi pi-arrow-circle-up"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Batch Student Promotion Workflow</h2>
+              <span class="badge-intake" style="background: #fef3c7; color: #b45309; border-color: #fcd34d;">Session Rollover</span>
+            </div>
+            <p class="modal-subtitle">Promote student cohort to the next academic grade and carry forward arrears</p>
+          </div>
+        </div>
+      </template>
+
+      <div class="intake-form-body">
+        <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 leading-relaxed">
           <i class="pi pi-info-circle mr-1"></i>
           <strong>Audit Rule:</strong> Promoting students creates new active enrollment records in the target session and carries forward unpaid arrears, whilst archiving and preserving past records without modification.
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FormField id="source_class" label="Source Grade Level">
-            <select
-              id="source_class"
-              v-model="promoteSourceClassId"
-              class="custom-select w-full"
-              @change="loadPromoteCandidates"
-            >
-              <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-          </FormField>
+        <!-- Section 1: Academic Cohort & Target Grade -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num bg-amber-600">1</span>
+            <div>
+              <h3 class="section-heading">Promotion Academic Route</h3>
+              <p class="section-desc">Select source grade, target session, target class and section</p>
+            </div>
+          </div>
 
-          <FormField id="target_session" label="Target Academic Session" required>
-            <select
-              id="target_session"
-              v-model="promoteForm.new_academic_year_id"
-              class="custom-select w-full"
-              required
-            >
-              <option v-for="y in academicYearsList" :key="y.id" :value="y.id">{{ y.name }}</option>
-            </select>
-          </FormField>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <FormField id="source_class" label="Source Grade Level">
+              <div class="clean-field-wrap">
+                <i class="pi pi-bookmark field-icon"></i>
+                <select
+                  id="source_class"
+                  v-model="promoteSourceClassId"
+                  class="clean-select"
+                  @change="loadPromoteCandidates"
+                >
+                  <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+              </div>
+            </FormField>
 
-          <FormField id="target_class" label="Target Grade Level" required>
-            <select
-              id="target_class"
-              v-model="promoteForm.target_class_id"
-              class="custom-select w-full"
-              required
-            >
-              <option value="" disabled>Select Target Class</option>
-              <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
+            <FormField id="target_session" label="Target Academic Session" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-calendar field-icon"></i>
+                <select
+                  id="target_session"
+                  v-model="promoteForm.new_academic_year_id"
+                  class="clean-select"
+                  required
+                >
+                  <option v-for="y in academicYearsList" :key="y.id" :value="y.id">{{ y.name }}</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="target_class" label="Target Grade Level" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-bookmark field-icon"></i>
+                <select
+                  id="target_class"
+                  v-model="promoteForm.target_class_id"
+                  class="clean-select"
+                  required
+                >
+                  <option value="" disabled>Select Target Class</option>
+                  <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+              </div>
+            </FormField>
+          </div>
+
+          <FormField id="target_section" label="Target Section / Arm" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-th-large field-icon"></i>
+              <select
+                id="target_section"
+                v-model="promoteForm.target_section_id"
+                class="clean-select"
+                required
+              >
+                <option value="" disabled>Select Target Section</option>
+                <option v-for="sec in targetSectionsList" :key="sec.id" :value="sec.id">{{ sec.name }}</option>
+              </select>
+            </div>
           </FormField>
         </div>
 
-        <FormField id="target_section" label="Target Section / Arm" required>
-          <select
-            id="target_section"
-            v-model="promoteForm.target_section_id"
-            class="custom-select w-full"
-            required
-          >
-            <option value="" disabled>Select Target Section</option>
-            <option v-for="sec in targetSectionsList" :key="sec.id" :value="sec.id">{{ sec.name }}</option>
-          </select>
-        </FormField>
+        <!-- Section 2: Candidate Roster Table -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num bg-amber-600">2</span>
+            <div>
+              <h3 class="section-heading">Eligible Student Roster</h3>
+              <p class="section-desc">Select candidates, designate new roll numbers, and review arrears carry-forward</p>
+            </div>
+          </div>
 
-        <!-- Candidate Roster Table -->
-        <div class="candidate-roster-box border border-slate-200 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-slate-100 text-slate-600 font-semibold sticky top-0">
-              <tr>
-                <th class="p-2 w-10 text-center">Include</th>
-                <th class="p-2">Student ID</th>
-                <th class="p-2">Name</th>
-                <th class="p-2">Current Roll</th>
-                <th class="p-2">New Roll</th>
-                <th class="p-2">Carried Arrears (৳)</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-200">
-              <tr v-for="cand in promoteForm.promotions" :key="cand.student_id" class="hover:bg-slate-50">
-                <td class="p-2 text-center">
-                  <input type="checkbox" v-model="cand.selected" class="w-4 h-4 cursor-pointer" />
-                </td>
-                <td class="p-2 font-mono text-slate-700 font-bold">{{ cand.student_uid }}</td>
-                <td class="p-2 font-bold text-slate-800">{{ cand.name }}</td>
-                <td class="p-2 font-mono text-slate-500">{{ cand.current_roll }}</td>
-                <td class="p-2">
-                  <input
-                    v-model.number="cand.new_roll"
-                    type="number"
-                    min="1"
-                    class="p-inputtext p-inputtext-sm font-mono w-20"
-                    :disabled="!cand.selected"
-                  />
-                </td>
-                <td class="p-2">
-                  <input
-                    v-model.number="cand.arrears_balance"
-                    type="number"
-                    min="0"
-                    class="p-inputtext p-inputtext-sm font-mono w-24"
-                    :disabled="!cand.selected"
-                  />
-                </td>
-              </tr>
-              <tr v-if="promoteForm.promotions.length === 0">
-                <td colspan="6" class="p-4 text-center text-slate-400">No active students found in this source class.</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="candidate-roster-box border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-100 text-slate-700 font-bold sticky top-0">
+                <tr>
+                  <th class="p-2.5 w-10 text-center">Include</th>
+                  <th class="p-2.5">Student ID</th>
+                  <th class="p-2.5">Name</th>
+                  <th class="p-2.5">Current Roll</th>
+                  <th class="p-2.5">New Roll</th>
+                  <th class="p-2.5">Carried Arrears (৳)</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white">
+                <tr v-for="cand in promoteForm.promotions" :key="cand.student_id" class="hover:bg-slate-50">
+                  <td class="p-2.5 text-center">
+                    <input type="checkbox" v-model="cand.selected" class="w-4 h-4 cursor-pointer accent-emerald-600" />
+                  </td>
+                  <td class="p-2.5 font-mono text-slate-700 font-bold">{{ cand.student_uid }}</td>
+                  <td class="p-2.5 font-bold text-slate-800">{{ cand.name }}</td>
+                  <td class="p-2.5 font-mono text-slate-500">#{{ cand.current_roll }}</td>
+                  <td class="p-2.5">
+                    <input
+                      v-model.number="cand.new_roll"
+                      type="number"
+                      min="1"
+                      class="clean-input font-mono w-24 h-8 px-2 py-1"
+                      :disabled="!cand.selected"
+                    />
+                  </td>
+                  <td class="p-2.5">
+                    <input
+                      v-model.number="cand.arrears_balance"
+                      type="number"
+                      min="0"
+                      class="clean-input font-mono w-28 h-8 px-2 py-1"
+                      :disabled="!cand.selected"
+                    />
+                  </td>
+                </tr>
+                <tr v-if="promoteForm.promotions.length === 0">
+                  <td colspan="6" class="p-6 text-center text-slate-400">No active students found in this source class.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="promoteDialogVisible = false" />
-          <Button
-            label="Promote Selected Students"
-            icon="pi pi-check"
-            :loading="promoting"
-            class="brand-gradient-bg border-none"
-            @click="handleExecutePromotion"
-          />
+        <div class="intake-form-footer">
+          <div class="text-xs text-slate-500 font-medium">
+            <span>Selected Candidates: </span>
+            <strong class="text-slate-800 font-bold">{{ promoteForm.promotions.filter(p => p.selected).length }}</strong>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button label="Cancel" severity="secondary" outlined @click="promoteDialogVisible = false" />
+            <Button
+              label="Promote Selected Students"
+              icon="pi pi-check"
+              :loading="promoting"
+              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              @click="handleExecutePromotion"
+            />
+          </div>
         </div>
       </div>
     </Dialog>
@@ -2042,43 +2117,79 @@ onMounted(async () => {
     <Dialog
       v-model:visible="graduateDialogVisible"
       modal
-      header="Final-Year Batch Graduation"
-      :style="{ width: '480px' }"
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
     >
-      <form @submit.prevent="handleExecuteGraduation" class="flex flex-col gap-4 pt-2">
-        <div class="p-3 bg-emerald-50 text-emerald-900 rounded-lg border border-emerald-200 text-xs">
-          <i class="pi pi-verified mr-1"></i>
-          Graduation converts student status to GRADUATED and finalizes their academic transcript records.
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); color: #047857; border-color: #a7f3d0;">
+            <i class="pi pi-graduation-cap"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Batch Student Graduation</h2>
+              <span class="badge-intake">Final Clearance</span>
+            </div>
+            <p class="modal-subtitle">Finalize graduation ceremony clearance and academic transcripts</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleExecuteGraduation" class="intake-form-body">
+        <div class="p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-200 text-xs leading-relaxed">
+          <i class="pi pi-verified mr-1 text-emerald-600 font-bold"></i>
+          Graduation converts student status to <strong class="font-bold">GRADUATED</strong> and finalizes their academic transcript records in the immutable ledger.
         </div>
 
-        <FormField id="grad_date" label="Graduation Date" required>
-          <InputText
-            id="grad_date"
-            v-model="graduateForm.graduation_date"
-            type="date"
-            class="w-full font-mono"
-            required
-          />
-        </FormField>
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">1</span>
+            <div>
+              <h3 class="section-heading">Graduation Particulars</h3>
+              <p class="section-desc">Official ceremony date and transcript completion remarks</p>
+            </div>
+          </div>
 
-        <FormField id="grad_remarks" label="Ceremony / Transcript Remarks">
-          <InputText
-            id="grad_remarks"
-            v-model="graduateForm.remarks"
-            placeholder="e.g. SSC Batch 2026 Graduated"
-            class="w-full"
-          />
-        </FormField>
+          <FormField id="grad_date" label="Graduation Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar field-icon"></i>
+              <input
+                id="grad_date"
+                v-model="graduateForm.graduation_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+          </FormField>
 
-        <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="graduateDialogVisible = false" />
-          <Button
-            type="submit"
-            label="Confirm Graduation"
-            icon="pi pi-graduation-cap"
-            :loading="graduating"
-            severity="success"
-          />
+          <FormField id="grad_remarks" label="Ceremony / Transcript Remarks">
+            <div class="clean-field-wrap">
+              <i class="pi pi-comment field-icon"></i>
+              <input
+                id="grad_remarks"
+                v-model="graduateForm.remarks"
+                placeholder="e.g. SSC Batch 2026 Graduated"
+                class="clean-input"
+              />
+            </div>
+          </FormField>
+        </div>
+
+        <div class="intake-form-footer">
+          <div class="text-xs text-slate-400 font-mono">
+            SIS Final Clearance
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button label="Cancel" severity="secondary" outlined @click="graduateDialogVisible = false" />
+            <Button
+              type="submit"
+              label="Confirm Graduation"
+              icon="pi pi-graduation-cap"
+              :loading="graduating"
+              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
         </div>
       </form>
     </Dialog>
@@ -2087,112 +2198,369 @@ onMounted(async () => {
     <Dialog
       v-model:visible="admissionDialogVisible"
       modal
-      header="New Student Admission (Bangladesh NCTB)"
-      :style="{ width: '680px' }"
+      :style="{ width: '840px', maxWidth: '96vw' }"
+      class="admission-intake-dialog"
     >
-      <form @submit.prevent="handleAdmitStudent" class="admission-form">
-        <h4 class="form-section-title"><i class="pi pi-user mr-1"></i> Personal Information</h4>
-        <div class="form-grid">
-          <FormField id="first_name" label="First Name" required :error="admissionErrors.first_name">
-            <InputText id="first_name" v-model="admissionForm.first_name" placeholder="e.g. Tanvir" required class="w-full" />
-          </FormField>
-          <FormField id="last_name" label="Last Name" required :error="admissionErrors.last_name">
-            <InputText id="last_name" v-model="admissionForm.last_name" placeholder="e.g. Hasan" required class="w-full" />
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon">
+            <i class="pi pi-id-card"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">New Student Admission</h2>
+              <span class="badge-intake">Direct Intake</span>
+            </div>
+            <p class="modal-subtitle">Direct institutional enrollment into academic session & classroom roster</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleAdmitStudent" class="intake-form-body">
+        <!-- Section 1: Academic Grade Selection -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">1</span>
+            <div>
+              <h3 class="section-heading">Academic Grade & Session Placement</h3>
+              <p class="section-desc">Designate target grade level, classroom section, and initial roll number</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="class_id" label="Class / Grade Level" required :error="admissionErrors.class_id">
+              <div class="clean-field-wrap">
+                <i class="pi pi-bookmark field-icon"></i>
+                <select id="class_id" v-model="admissionForm.class_id" class="clean-select" required>
+                  <option value="" disabled>Select Class</option>
+                  <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField label="Target Academic Session">
+              <div class="clean-field-wrap">
+                <i class="pi pi-calendar field-icon text-emerald-600"></i>
+                <div class="clean-session-badge">
+                  <span class="pulse-dot"></span>
+                  <span class="font-medium text-emerald-900">{{ activeSessionName }}</span>
+                </div>
+              </div>
+            </FormField>
+          </div>
+
+          <div class="form-grid grid-3">
+            <FormField id="section_id" label="Section / Arm" required :error="admissionErrors.section_id">
+              <div class="clean-field-wrap">
+                <i class="pi pi-th-large field-icon"></i>
+                <select id="section_id" v-model="admissionForm.section_id" class="clean-select" required>
+                  <option value="" disabled>Select Section</option>
+                  <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="roll_number" label="Assigned Roll Number" required :error="admissionErrors.roll_number">
+              <div class="clean-field-wrap">
+                <i class="pi pi-hashtag field-icon"></i>
+                <input
+                  id="roll_number"
+                  v-model.number="admissionForm.roll_number"
+                  type="number"
+                  min="1"
+                  max="500"
+                  required
+                  placeholder="e.g. 1"
+                  class="clean-input font-mono font-bold"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="opening_arrears" label="Opening Balance Arrears (৳)">
+              <div class="clean-field-wrap">
+                <i class="pi pi-wallet field-icon"></i>
+                <input
+                  id="opening_arrears"
+                  v-model.number="admissionForm.opening_balance_arrears"
+                  type="number"
+                  min="0"
+                  placeholder="0.00"
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+          </div>
+        </div>
+
+        <!-- Section 2: Student Demographic & Identity -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">2</span>
+            <div>
+              <h3 class="section-heading">Student Personal Particulars</h3>
+              <p class="section-desc">Legal name, date of birth, gender, and biological details</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="first_name" label="First Name" required :error="admissionErrors.first_name">
+              <div class="clean-field-wrap">
+                <i class="pi pi-user field-icon"></i>
+                <input
+                  id="first_name"
+                  v-model="admissionForm.first_name"
+                  type="text"
+                  placeholder="e.g. Tanvir"
+                  required
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="last_name" label="Last Name" required :error="admissionErrors.last_name">
+              <div class="clean-field-wrap">
+                <i class="pi pi-user field-icon"></i>
+                <input
+                  id="last_name"
+                  v-model="admissionForm.last_name"
+                  type="text"
+                  placeholder="e.g. Hasan"
+                  required
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+          </div>
+
+          <div class="form-grid grid-3">
+            <FormField id="date_of_birth" label="Date of Birth" required :error="admissionErrors.date_of_birth">
+              <div class="clean-field-wrap">
+                <i class="pi pi-calendar field-icon"></i>
+                <input
+                  id="date_of_birth"
+                  v-model="admissionForm.date_of_birth"
+                  type="date"
+                  required
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+
+            <FormField label="Gender" required>
+              <div class="segmented-control">
+                <button
+                  type="button"
+                  class="segmented-btn"
+                  :class="{ active: admissionForm.gender === 'MALE' }"
+                  @click="admissionForm.gender = 'MALE'"
+                >
+                  Male
+                </button>
+                <button
+                  type="button"
+                  class="segmented-btn"
+                  :class="{ active: admissionForm.gender === 'FEMALE' }"
+                  @click="admissionForm.gender = 'FEMALE'"
+                >
+                  Female
+                </button>
+                <button
+                  type="button"
+                  class="segmented-btn"
+                  :class="{ active: admissionForm.gender === 'OTHER' }"
+                  @click="admissionForm.gender = 'OTHER'"
+                >
+                  Other
+                </button>
+              </div>
+            </FormField>
+
+            <FormField id="blood_group" label="Blood Group">
+              <div class="clean-field-wrap">
+                <i class="pi pi-heart field-icon text-rose-500"></i>
+                <select id="blood_group" v-model="admissionForm.blood_group" class="clean-select font-mono">
+                  <option value="A+">A (+ve)</option>
+                  <option value="A-">A (-ve)</option>
+                  <option value="B+">B (+ve)</option>
+                  <option value="B-">B (-ve)</option>
+                  <option value="O+">O (+ve)</option>
+                  <option value="O-">O (-ve)</option>
+                  <option value="AB+">AB (+ve)</option>
+                  <option value="AB-">AB (-ve)</option>
+                </select>
+              </div>
+            </FormField>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="religion" label="Religion">
+              <div class="clean-field-wrap">
+                <i class="pi pi-shield field-icon"></i>
+                <select id="religion" v-model="admissionForm.religion" class="clean-select">
+                  <option value="Islam">Islam</option>
+                  <option value="Hinduism">Hinduism</option>
+                  <option value="Christianity">Christianity</option>
+                  <option value="Buddhism">Buddhism</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </FormField>
+
+            <FormField id="emergency_phone" label="Emergency Contact Phone" required :error="admissionErrors.emergency_phone">
+              <div class="clean-field-wrap">
+                <i class="pi pi-phone field-icon"></i>
+                <input
+                  id="emergency_phone"
+                  v-model="admissionForm.emergency_phone"
+                  type="tel"
+                  placeholder="+8801819000000"
+                  required
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+          </div>
+        </div>
+
+        <!-- Section 3: Contact & Present Residency -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">3</span>
+            <div>
+              <h3 class="section-heading">Contact & Present Residency</h3>
+              <p class="section-desc">Current residential address and living quarters</p>
+            </div>
+          </div>
+
+          <FormField id="present_address" label="Present Address" required :error="admissionErrors.present_address">
+            <div class="clean-field-wrap">
+              <i class="pi pi-map-pin field-icon"></i>
+              <input
+                id="present_address"
+                v-model="admissionForm.present_address"
+                type="text"
+                placeholder="House #, Road #, Area, City"
+                required
+                class="clean-input"
+              />
+            </div>
           </FormField>
         </div>
 
-        <div class="form-grid">
-          <FormField id="date_of_birth" label="Date of Birth" required :error="admissionErrors.date_of_birth">
-            <InputText id="date_of_birth" v-model="admissionForm.date_of_birth" type="date" required class="w-full font-mono" />
-          </FormField>
-          <FormField id="gender" label="Gender" required>
-            <select id="gender" v-model="admissionForm.gender" class="custom-select w-full">
-              <option value="MALE">Male</option>
-              <option value="FEMALE">Female</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </FormField>
+        <!-- Section 4: Primary Guardian Particulars -->
+        <div class="form-section-card">
+          <div class="section-title-row">
+            <span class="section-num">4</span>
+            <div>
+              <h3 class="section-heading">Primary Guardian Particulars</h3>
+              <p class="section-desc">Designated point of contact for academic correspondence and fee billing</p>
+            </div>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="guardian_name" label="Guardian Full Name" required :error="admissionErrors['guardian.name']">
+              <div class="clean-field-wrap">
+                <i class="pi pi-user field-icon"></i>
+                <input
+                  id="guardian_name"
+                  v-model="admissionForm.guardian.name"
+                  type="text"
+                  placeholder="Full name of parent or legal guardian"
+                  required
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+
+            <FormField label="Relationship to Student" required>
+              <div class="segmented-control">
+                <button
+                  type="button"
+                  class="segmented-btn"
+                  :class="{ active: admissionForm.guardian.relationship === 'FATHER' }"
+                  @click="admissionForm.guardian.relationship = 'FATHER'"
+                >
+                  Father
+                </button>
+                <button
+                  type="button"
+                  class="segmented-btn"
+                  :class="{ active: admissionForm.guardian.relationship === 'MOTHER' }"
+                  @click="admissionForm.guardian.relationship = 'MOTHER'"
+                >
+                  Mother
+                </button>
+                <button
+                  type="button"
+                  class="segmented-btn"
+                  :class="{ active: admissionForm.guardian.relationship === 'LEGAL_GUARDIAN' }"
+                  @click="admissionForm.guardian.relationship = 'LEGAL_GUARDIAN'"
+                >
+                  Guardian
+                </button>
+              </div>
+            </FormField>
+          </div>
+
+          <div class="form-grid grid-2">
+            <FormField id="guardian_phone" label="Guardian Phone" required :error="admissionErrors['guardian.phone']">
+              <div class="clean-field-wrap">
+                <i class="pi pi-phone field-icon"></i>
+                <input
+                  id="guardian_phone"
+                  v-model="admissionForm.guardian.phone"
+                  type="tel"
+                  placeholder="+8801700000000"
+                  required
+                  class="clean-input font-mono"
+                />
+              </div>
+            </FormField>
+
+            <FormField id="guardian_email" label="Guardian Email">
+              <div class="clean-field-wrap">
+                <i class="pi pi-envelope field-icon"></i>
+                <input
+                  id="guardian_email"
+                  v-model="admissionForm.guardian.email"
+                  type="email"
+                  placeholder="guardian@example.com"
+                  class="clean-input"
+                />
+              </div>
+            </FormField>
+          </div>
         </div>
 
-        <div class="form-grid">
-          <FormField id="blood_group" label="Blood Group">
-            <select id="blood_group" v-model="admissionForm.blood_group" class="custom-select w-full">
-              <option value="A+">A+</option>
-              <option value="A-">A-</option>
-              <option value="B+">B+</option>
-              <option value="B-">B-</option>
-              <option value="O+">O+</option>
-              <option value="O-">O-</option>
-              <option value="AB+">AB+</option>
-              <option value="AB-">AB-</option>
-            </select>
-          </FormField>
-          <FormField id="emergency_phone" label="Emergency Contact Phone" required :error="admissionErrors.emergency_phone">
-            <InputText id="emergency_phone" v-model="admissionForm.emergency_phone" placeholder="+8801819000000" required class="w-full font-mono" />
-          </FormField>
-        </div>
-
-        <FormField id="present_address" label="Present Address" required :error="admissionErrors.present_address">
-          <InputText id="present_address" v-model="admissionForm.present_address" placeholder="Road, Area, City" required class="w-full" />
-        </FormField>
-
-        <h4 class="form-section-title mt-4"><i class="pi pi-book mr-1"></i> Academic Enrollment</h4>
-        <div class="form-grid">
-          <FormField id="class_id" label="Class / Grade Level" required :error="admissionErrors.class_id">
-            <select id="class_id" v-model="admissionForm.class_id" class="custom-select w-full" required>
-              <option value="" disabled>Select Class</option>
-              <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-          </FormField>
-          <FormField id="section_id" label="Section / Arm" required :error="admissionErrors.section_id">
-            <select id="section_id" v-model="admissionForm.section_id" class="custom-select w-full" required>
-              <option value="" disabled>Select Section</option>
-              <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
-          </FormField>
-        </div>
-
-        <div class="form-grid">
-          <FormField id="roll_number" label="Assigned Roll Number" required :error="admissionErrors.roll_number">
-            <input id="roll_number" v-model.number="admissionForm.roll_number" type="number" min="1" max="500" required class="custom-number-input p-inputtext w-full font-mono font-bold" />
-          </FormField>
-          <FormField id="opening_arrears" label="Opening Balance Arrears (৳)">
-            <input id="opening_arrears" v-model.number="admissionForm.opening_balance_arrears" type="number" min="0" class="custom-number-input p-inputtext w-full font-mono" />
-          </FormField>
-        </div>
-
-        <h4 class="form-section-title mt-4"><i class="pi pi-shield mr-1"></i> Guardian Information</h4>
-        <div class="form-grid">
-          <FormField id="guardian_name" label="Guardian Name" required :error="admissionErrors['guardian.name']">
-            <InputText id="guardian_name" v-model="admissionForm.guardian.name" placeholder="Full name of parent" required class="w-full" />
-          </FormField>
-          <FormField id="guardian_phone" label="Guardian Phone" required :error="admissionErrors['guardian.phone']">
-            <InputText id="guardian_phone" v-model="admissionForm.guardian.phone" placeholder="+8801700000000" required class="w-full font-mono" />
-          </FormField>
-        </div>
-
-        <div class="form-grid">
-          <FormField id="guardian_rel" label="Relationship" required>
-            <select id="guardian_rel" v-model="admissionForm.guardian.relationship" class="custom-select w-full">
-              <option value="FATHER">Father</option>
-              <option value="MOTHER">Mother</option>
-              <option value="LEGAL_GUARDIAN">Legal Guardian</option>
-            </select>
-          </FormField>
-          <FormField id="guardian_email" label="Guardian Email">
-            <InputText id="guardian_email" v-model="admissionForm.guardian.email" type="email" placeholder="guardian@example.com" class="w-full" />
-          </FormField>
-        </div>
-
-        <div class="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="admissionDialogVisible = false" />
-          <Button
-            type="submit"
-            label="Complete Admission"
-            icon="pi pi-check"
-            :loading="admitting"
-            class="brand-gradient-bg border-none px-6"
-          />
+        <!-- Clean Modal Action Footer -->
+        <div class="intake-form-footer">
+          <div class="flex items-center gap-2">
+            <Button
+              type="button"
+              label="Reset"
+              icon="pi pi-refresh"
+              severity="secondary"
+              text
+              size="small"
+              @click="resetAdmissionForm"
+            />
+          </div>
+          <div class="flex items-center gap-2.5">
+            <Button
+              type="button"
+              label="Cancel"
+              severity="secondary"
+              outlined
+              @click="admissionDialogVisible = false"
+            />
+            <Button
+              type="submit"
+              label="Complete Admission"
+              icon="pi pi-check-circle"
+              :loading="admitting"
+              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+            />
+          </div>
         </div>
       </form>
     </Dialog>
@@ -2228,86 +2596,145 @@ onMounted(async () => {
   border-color: #059669;
 }
 
-.student-name-box {
-  display: flex;
-  flex-direction: column;
-}
-
-.admission-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.form-section-title {
-  font-size: 0.825rem;
-  font-weight: 700;
-  color: #065f46;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding-bottom: 0.35rem;
-  border-bottom: 1px dashed #cbd5e1;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.85rem;
-}
-
-.enrollment-history-card,
-.guardians-card {
-  padding: 1.25rem;
-  border-radius: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-}
-
-.history-table-container {
-  overflow-x: auto;
-}
-
-/* Student Profile Modal Styles */
+/* Modal Header Styling */
 .modal-header-banner {
   display: flex;
   align-items: center;
   gap: 0.85rem;
 }
 
-.student-avatar-lg {
-  width: 48px;
-  height: 48px;
+.modal-header-icon {
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #047857 0%, #10b981 100%);
-  color: #ffffff;
-  font-weight: 800;
-  font-size: 1.15rem;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  color: #047857;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 6px -1px rgba(4, 120, 87, 0.2);
+  font-size: 1.25rem;
+  border: 1px solid #a7f3d0;
+  box-shadow: 0 2px 4px rgba(4, 120, 87, 0.08);
   flex-shrink: 0;
-  letter-spacing: 0.05em;
 }
 
-.student-uid-badge {
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  color: #334155;
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
+.modal-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
-.student-uid-badge:hover {
-  background: #e2e8f0;
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 700;
   color: #0f172a;
-  border-color: #94a3b8;
+  letter-spacing: -0.015em;
 }
 
+.badge-intake {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.modal-subtitle {
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-weight: 400;
+}
+
+/* Form Container & Sections */
+.intake-form-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  padding-top: 0.5rem;
+}
+
+.form-section-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.15rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-section-card:hover {
+  border-color: #cbd5e1;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.section-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #047857;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.section-heading {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.3;
+}
+
+.section-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.2;
+}
+
+/* Form Grids */
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-grid.grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid.grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 680px) {
+  .form-grid.grid-2,
+  .form-grid.grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Clean Input & Select Elements */
 .clean-field-wrap {
   position: relative;
   display: flex;
@@ -2331,15 +2758,21 @@ onMounted(async () => {
 
 .clean-input {
   width: 100%;
-  height: 38px;
-  padding: 0.5rem 0.85rem 0.5rem 2.3rem;
-  font-size: 0.8125rem;
+  height: 42px;
+  padding: 0.55rem 0.85rem 0.55rem 2.4rem;
+  font-size: 0.875rem;
+  font-family: var(--font-family);
   color: #1e293b;
   background-color: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 9px;
   outline: none;
   transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.clean-input:hover {
+  border-color: #94a3b8;
 }
 
 .clean-input:focus {
@@ -2347,23 +2780,41 @@ onMounted(async () => {
   box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
 }
 
+.clean-input:disabled {
+  background-color: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+  border-color: #e2e8f0;
+}
+
+.clean-input::placeholder {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
 .clean-select {
   width: 100%;
-  height: 38px;
-  padding: 0.5rem 2rem 0.5rem 2.3rem;
-  font-size: 0.8125rem;
+  height: 42px;
+  padding: 0.55rem 2.2rem 0.55rem 2.4rem;
+  font-size: 0.875rem;
+  font-family: var(--font-family);
   color: #1e293b;
   background-color: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 9px;
   outline: none;
   cursor: pointer;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
-  background-size: 0.875rem;
+  background-size: 1rem;
   transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.clean-select:hover {
+  border-color: #94a3b8;
 }
 
 .clean-select:focus {
@@ -2371,12 +2822,239 @@ onMounted(async () => {
   box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
 }
 
-.snapshot-card {
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+.clean-textarea {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.875rem;
+  font-family: var(--font-family);
+  color: #1e293b;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  outline: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.snapshot-card:hover {
-  transform: translateY(-1px);
+.clean-textarea:focus {
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+}
+
+/* Static session badge */
+.clean-session-badge {
+  width: 100%;
+  height: 42px;
+  padding: 0.55rem 0.85rem 0.55rem 2.4rem;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2);
+  flex-shrink: 0;
+}
+
+/* Segmented Control Buttons */
+.segmented-control {
+  display: flex;
+  background: #e2e8f0;
+  padding: 3px;
+  border-radius: 9px;
+  gap: 3px;
+  height: 42px;
+  align-items: center;
+}
+
+.segmented-btn {
+  flex: 1;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.segmented-btn:hover:not(.active) {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.segmented-btn.active {
+  background: #ffffff;
+  color: #047857;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+  font-weight: 700;
+}
+
+/* Modal Action Footer */
+.intake-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 1rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Student Details Modal Styles */
+.applicant-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #047857 0%, #10b981 100%);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 1.125rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px -1px rgba(4, 120, 87, 0.2);
+  flex-shrink: 0;
+  letter-spacing: 0.05em;
+}
+
+.ref-badge {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+}
+
+.details-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  padding-top: 0.25rem;
+}
+
+.summary-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .summary-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.summary-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.summary-val {
+  font-size: 0.875rem;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.detail-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.section-title-clean {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #0f172a;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.detail-data-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .detail-data-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.data-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.data-item.col-span-2 {
+  grid-column: span 2 / span 2;
+}
+
+.data-item.col-span-3 {
+  grid-column: span 3 / span 3;
+}
+
+@media (max-width: 640px) {
+  .data-item.col-span-2,
+  .data-item.col-span-3 {
+    grid-column: span 1 / span 1;
+  }
+}
+
+.data-label {
+  font-size: 0.725rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.data-val {
+  font-size: 0.875rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  word-break: break-word;
 }
 
 .transfer-type-card {
@@ -2405,15 +3083,5 @@ onMounted(async () => {
 
 .suggestion-btn:active {
   transform: translateY(0);
-}
-
-.profile-card {
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-}
-
-@media (max-width: 640px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
