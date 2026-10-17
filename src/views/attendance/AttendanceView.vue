@@ -406,39 +406,40 @@ onMounted(async () => {
     <!-- 1. Take Attendance Roll-Call Panel -->
     <div v-if="activeTab === 'take'" class="table-card glass-panel flex flex-col gap-5">
       <!-- Selector Controls -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-x-6 xl:gap-x-8 gap-y-5 p-5 sm:p-6 bg-slate-50/90 rounded-2xl border border-slate-200/90 shadow-sm text-xs">
-        <FormField id="roll_class" label="Class / Grade Level" class="min-w-0">
-          <select id="roll_class" v-model="selectedClassId" class="custom-select w-full h-[42px]">
+      <div class="attendance-filter-bar grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-x-6 xl:gap-x-8 gap-y-5 p-5 sm:p-6 bg-slate-50/90 rounded-2xl border border-slate-200/90 shadow-sm text-xs">
+        <FormField id="roll_class" label="Class / Grade Level" class="min-w-0 attendance-filter-col">
+          <select id="roll_class" v-model="selectedClassId" class="attendance-filter-input">
             <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </FormField>
 
-        <FormField id="roll_section" label="Section / Arm" class="min-w-0">
-          <select id="roll_section" v-model="selectedSectionId" class="custom-select w-full h-[42px]">
+        <FormField id="roll_section" label="Section / Arm" class="min-w-0 attendance-filter-col">
+          <select id="roll_section" v-model="selectedSectionId" class="attendance-filter-input">
             <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
         </FormField>
 
-        <FormField id="roll_date" label="Attendance Date" class="min-w-0">
-          <InputText id="roll_date" v-model="sessionDate" type="date" class="w-full font-mono text-xs sm:text-sm h-[42px] px-3.5 rounded-lg border border-slate-300 bg-white" @change="loadRoster" />
+        <FormField id="roll_date" label="Attendance Date" class="min-w-0 attendance-filter-col">
+          <InputText id="roll_date" v-model="sessionDate" type="date" class="attendance-filter-input" @change="loadRoster" />
         </FormField>
 
-        <FormField id="roll_type" label="Attendance Mode" class="min-w-0">
-          <select id="roll_type" v-model="attendanceType" class="custom-select w-full h-[42px]" @change="loadRoster">
+        <FormField id="roll_type" label="Attendance Mode" class="min-w-0 attendance-filter-col">
+          <select id="roll_type" v-model="attendanceType" class="attendance-filter-input" @change="loadRoster">
             <option value="DAILY_HOMEROOM">Daily Homeroom</option>
             <option value="PERIOD_WISE">Period-Wise Subject</option>
           </select>
         </FormField>
 
-        <FormField v-if="attendanceType === 'PERIOD_WISE'" id="roll_period" label="Class Period" class="min-w-0">
-          <select id="roll_period" v-model="selectedPeriodId" class="custom-select w-full h-[42px]" @change="loadRoster">
+        <FormField v-if="attendanceType === 'PERIOD_WISE'" id="roll_period" label="Class Period" class="min-w-0 attendance-filter-col">
+          <select id="roll_period" v-model="selectedPeriodId" class="attendance-filter-input" @change="loadRoster">
             <option value="" disabled>Select Period</option>
             <option v-for="p in periodsList" :key="p.id" :value="p.id">{{ p.name }} ({{ p.start_time.substring(0, 5) }})</option>
           </select>
         </FormField>
 
-        <div v-else class="flex flex-col justify-end min-w-0">
-          <Button label="Reload Roster" icon="pi pi-sync" severity="secondary" outlined size="small" class="h-[42px] w-full text-xs font-semibold rounded-lg" :loading="rosterLoading" @click="loadRoster" />
+        <div v-else class="flex flex-col justify-end min-w-0 attendance-filter-col">
+          <span class="attendance-filter-label-spacer select-none pointer-events-none hidden sm:inline-block" aria-hidden="true">&nbsp;</span>
+          <Button label="Reload Roster" icon="pi pi-sync" severity="secondary" outlined size="small" class="attendance-filter-btn" :loading="rosterLoading" @click="loadRoster" />
         </div>
       </div>
 
@@ -914,6 +915,89 @@ onMounted(async () => {
 .custom-select:focus {
   border-color: #059669;
   box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+/* Unified Attendance Selector Controls */
+.attendance-filter-bar :deep(.field-label) {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  color: #334155 !important;
+  line-height: 1.25rem !important;
+  height: 1.25rem !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.attendance-filter-bar :deep(.field-label-row) {
+  height: 1.25rem !important;
+  min-height: 1.25rem !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.attendance-filter-label-spacer {
+  height: 1.25rem;
+  min-height: 1.25rem;
+  line-height: 1.25rem;
+  margin-bottom: 0.35rem;
+  display: block;
+}
+
+.attendance-filter-input {
+  width: 100% !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  max-height: 42px !important;
+  padding: 0 0.875rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  font-family: inherit !important;
+  color: #334155 !important;
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 0.5rem !important;
+  box-sizing: border-box !important;
+  outline: none !important;
+  transition: all 0.2s ease !important;
+  display: block !important;
+  line-height: 40px !important;
+}
+
+.attendance-filter-input:focus {
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15) !important;
+}
+
+select.attendance-filter-input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem 1rem;
+  padding-right: 2.25rem !important;
+  cursor: pointer;
+}
+
+input[type="date"].attendance-filter-input {
+  cursor: pointer;
+}
+
+.attendance-filter-btn {
+  height: 42px !important;
+  min-height: 42px !important;
+  max-height: 42px !important;
+  width: 100% !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  border-radius: 0.5rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 .status-btn-group {
