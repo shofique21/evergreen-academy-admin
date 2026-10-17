@@ -387,6 +387,14 @@ async function quickToggleTermStatus(term: AcademicTerm, session?: AcademicSessi
   }
 }
 
+function applySectionNamePreset(name: string) {
+  sectionForm.value.name = name
+}
+
+function applyCapacityPreset(cap: number) {
+  sectionForm.value.capacity = cap
+}
+
 function openAddSectionModal(classId?: number) {
   sectionForm.value = {
     class_id: classId || classStructures.value[0]?.id || '',
@@ -1386,44 +1394,217 @@ onMounted(() => {
       </form>
     </Dialog>
 
-    <!-- Create Section Dialog -->
-    <Dialog v-model:visible="sectionDialogVisible" modal header="Register Section / Arm" :style="{ width: '460px' }">
-      <form @submit.prevent="handleCreateSection" class="flex flex-col gap-4 pt-2">
-        <FormField id="sec_class" label="Class Level" required>
-          <select id="sec_class" v-model="sectionForm.class_id" class="custom-select w-full" required>
-            <option v-for="c in classStructures" :key="c.id" :value="c.id">{{ c.grade }}</option>
-          </select>
-        </FormField>
+    <!-- Register Section / Arm Dialog -->
+    <Dialog
+      v-model:visible="sectionDialogVisible"
+      modal
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="section-create-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-emerald-100 text-emerald-800">
+            <i class="pi pi-sitemap"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Register Section / Arm</h2>
+              <span class="badge-institutional">Class Structure</span>
+            </div>
+            <p class="modal-subtitle">Configure student cohort arm, curriculum medium, shift, and seat quota</p>
+          </div>
+        </div>
+      </template>
 
-        <FormField id="sec_name" label="Section Name" required>
-          <InputText id="sec_name" v-model="sectionForm.name" placeholder="e.g. Padma, Meghna, Section A" class="w-full" required />
-        </FormField>
-
-        <div class="grid grid-cols-2 gap-3">
-          <FormField id="sec_shift" label="Shift" required>
-            <select id="sec_shift" v-model="sectionForm.shift_id" class="custom-select w-full" required>
-              <option v-for="sh in shiftsList" :key="sh.id" :value="sh.id">{{ sh.name }}</option>
+      <form @submit.prevent="handleCreateSection" class="flex flex-col gap-4 pt-1">
+        <!-- Target Class Level -->
+        <FormField id="sec_class" label="Target Grade / Class Level" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-book field-icon text-emerald-600"></i>
+            <select
+              id="sec_class"
+              v-model="sectionForm.class_id"
+              class="clean-input font-semibold"
+              required
+            >
+              <option value="" disabled>Select academic grade level...</option>
+              <option v-for="c in classStructures" :key="c.id" :value="c.id">
+                {{ c.grade }} (Level #{{ c.numeric_level }})
+              </option>
             </select>
+          </div>
+        </FormField>
+
+        <!-- Section / Arm Name with Quick Presets -->
+        <FormField id="sec_name" label="Section Title / Arm Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon text-indigo-500"></i>
+            <input
+              id="sec_name"
+              v-model="sectionForm.name"
+              type="text"
+              placeholder="e.g. Padma, Meghna, Section A"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySectionNamePreset('Padma')"
+            >
+              Padma
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySectionNamePreset('Meghna')"
+            >
+              Meghna
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySectionNamePreset('Jamuna')"
+            >
+              Jamuna
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySectionNamePreset('Section A')"
+            >
+              Section A
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySectionNamePreset('Section B')"
+            >
+              Section B
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Operational Shift & Curriculum Medium Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="sec_shift" label="Operational Shift" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-clock field-icon text-amber-600"></i>
+              <select
+                id="sec_shift"
+                v-model="sectionForm.shift_id"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="" disabled>Select shift...</option>
+                <option v-for="sh in shiftsList" :key="sh.id" :value="sh.id">
+                  {{ sh.name }}
+                </option>
+              </select>
+            </div>
           </FormField>
-          <FormField id="sec_medium" label="Medium" required>
-            <select id="sec_medium" v-model="sectionForm.medium_id" class="custom-select w-full" required>
-              <option v-for="m in mediumsList" :key="m.id" :value="m.id">{{ m.name }}</option>
-            </select>
+
+          <FormField id="sec_medium" label="Instructional Medium" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-globe field-icon text-cyan-600"></i>
+              <select
+                id="sec_medium"
+                v-model="sectionForm.medium_id"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="" disabled>Select medium...</option>
+                <option v-for="m in mediumsList" :key="m.id" :value="m.id">
+                  {{ m.name }}
+                </option>
+              </select>
+            </div>
           </FormField>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <!-- Seating Capacity & Facility Room Allocation Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
           <FormField id="sec_cap" label="Seat Capacity" required>
-            <input id="sec_cap" v-model.number="sectionForm.capacity" type="number" min="1" max="200" class="custom-number-input p-inputtext w-full font-mono" required />
+            <div class="clean-field-wrap">
+              <i class="pi pi-users field-icon text-teal-600"></i>
+              <input
+                id="sec_cap"
+                v-model.number="sectionForm.capacity"
+                type="number"
+                min="1"
+                max="200"
+                placeholder="45"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+            <div class="quick-presets">
+              <span class="preset-label">Seats:</span>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyCapacityPreset(40)"
+              >
+                40
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyCapacityPreset(45)"
+              >
+                45
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyCapacityPreset(50)"
+              >
+                50
+              </button>
+            </div>
           </FormField>
+
           <FormField id="sec_room" label="Room Allocation">
-            <InputText id="sec_room" v-model="sectionForm.room_number" placeholder="e.g. Room 204" class="w-full" />
+            <div class="clean-field-wrap">
+              <i class="pi pi-building field-icon text-violet-600"></i>
+              <input
+                id="sec_room"
+                v-model="sectionForm.room_number"
+                type="text"
+                list="classroom_options"
+                placeholder="e.g. Room 204"
+                class="clean-input font-mono"
+              />
+              <datalist id="classroom_options">
+                <option v-for="r in roomsList" :key="r.id" :value="r.room_number">
+                  {{ r.building_name }} (Cap: {{ r.capacity }})
+                </option>
+              </datalist>
+            </div>
           </FormField>
         </div>
 
-        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="sectionDialogVisible = false" />
-          <Button type="submit" label="Save Section" icon="pi pi-check" :loading="sectionSubmitting" class="brand-gradient-bg border-none" />
+        <!-- Clean Modal Action Footer -->
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="modal-btn-cancel"
+            @click="sectionDialogVisible = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            :disabled="sectionSubmitting"
+            class="modal-btn-primary"
+          >
+            <i v-if="sectionSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+            <i v-else class="pi pi-check text-xs"></i>
+            <span>{{ sectionSubmitting ? 'Registering...' : 'Register Section Arm' }}</span>
+          </button>
         </div>
       </form>
     </Dialog>
