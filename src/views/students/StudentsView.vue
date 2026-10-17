@@ -1365,18 +1365,31 @@ onMounted(async () => {
             />
           </FormField>
 
-          <!-- Quick Suggestions -->
-          <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
-            <span class="text-[11px] text-slate-400 font-medium mr-1">Suggestions:</span>
-            <button
-              v-for="sug in transferReasonSuggestions"
-              :key="sug"
-              type="button"
-              class="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 transition-colors"
-              @click="transferForm.reason = sug"
-            >
-              {{ sug }}
-            </button>
+          <!-- Quick Suggestions Chips -->
+          <div class="space-y-1.5 pt-1">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                <i class="pi pi-sparkles text-emerald-600 text-xs"></i>
+                Quick Reason Suggestions
+              </span>
+              <span v-if="transferForm.reason" class="text-[11px] text-slate-400">Click to switch reason</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="sug in transferReasonSuggestions"
+                :key="sug"
+                type="button"
+                class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer border shadow-2xs"
+                :class="transferForm.reason === sug
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold ring-2 ring-emerald-400/20 shadow-xs'
+                  : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200/90 hover:border-slate-300 hover:text-slate-900'"
+                @click="transferForm.reason = sug"
+              >
+                <i v-if="transferForm.reason === sug" class="pi pi-check text-[10px] text-emerald-600 font-bold"></i>
+                <i v-else class="pi pi-tag text-[10px] text-slate-400"></i>
+                <span>{{ sug }}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1506,18 +1519,31 @@ onMounted(async () => {
               />
             </FormField>
 
-            <!-- Quick Suggestions -->
-            <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
-              <span class="text-[11px] text-slate-400 font-medium mr-1">Suggestions:</span>
-              <button
-                v-for="sug in withdrawReasonSuggestions"
-                :key="sug"
-                type="button"
-                class="px-2 py-0.5 text-[11px] rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 transition-colors"
-                @click="withdrawForm.reason = sug"
-              >
-                {{ sug }}
-              </button>
+            <!-- Quick Departure Reason Chips -->
+            <div class="space-y-1.5 pt-1">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="pi pi-sparkles text-rose-500 text-xs"></i>
+                  Quick Departure Reasons
+                </span>
+                <span v-if="withdrawForm.reason" class="text-[11px] text-slate-400">Click to switch reason</span>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="sug in withdrawReasonSuggestions"
+                  :key="sug"
+                  type="button"
+                  class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer border shadow-2xs"
+                  :class="withdrawForm.reason === sug
+                    ? 'bg-rose-50 border-rose-300 text-rose-700 font-semibold ring-2 ring-rose-400/20 shadow-xs'
+                    : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200/90 hover:border-slate-300 hover:text-slate-900'"
+                  @click="withdrawForm.reason = sug"
+                >
+                  <i v-if="withdrawForm.reason === sug" class="pi pi-check text-[10px] text-rose-600 font-bold"></i>
+                  <i v-else class="pi pi-tag text-[10px] text-slate-400"></i>
+                  <span>{{ sug }}</span>
+                </button>
+              </div>
             </div>
           </div>
 
