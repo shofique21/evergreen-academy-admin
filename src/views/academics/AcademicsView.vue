@@ -189,6 +189,17 @@ const roomForm = ref({
   room_type: 'CLASSROOM',
 })
 
+// Edit Room Modal
+const editRoomDialogVisible = ref(false)
+const editRoomSubmitting = ref(false)
+const editingRoom = ref<any | null>(null)
+const editRoomForm = ref({
+  room_number: '',
+  building_name: '',
+  capacity: 45,
+  room_type: 'CLASSROOM' as 'CLASSROOM' | 'LAB_PHYSICS' | 'LAB_CHEMISTRY' | 'LAB_ICT' | 'AUDITORIUM',
+})
+
 async function fetchAcademicData() {
   try {
     loading.value = true
@@ -593,6 +604,67 @@ async function handleCreateRoom() {
   }
 }
 
+function openEditRoomModal(room: any) {
+  editingRoom.value = room
+  editRoomForm.value = {
+    room_number: room.room_number,
+    building_name: room.building_name,
+    capacity: room.capacity ?? 45,
+    room_type: room.room_type || 'CLASSROOM',
+  }
+  editRoomDialogVisible.value = true
+}
+
+function applyEditRoomPreset(roomNumber: string, roomType: 'CLASSROOM' | 'LAB_PHYSICS' | 'LAB_CHEMISTRY' | 'LAB_ICT' | 'AUDITORIUM', capacity: number, buildingName?: string) {
+  editRoomForm.value.room_number = roomNumber
+  editRoomForm.value.room_type = roomType
+  editRoomForm.value.capacity = capacity
+  if (buildingName) {
+    editRoomForm.value.building_name = buildingName
+  }
+}
+
+async function handleUpdateRoom() {
+  if (!editingRoom.value) return
+  if (!editRoomForm.value.room_number || !editRoomForm.value.building_name) {
+    notifyWarn('Validation', 'Please provide room number and building.')
+    return
+  }
+
+  try {
+    editRoomSubmitting.value = true
+    await api.put(`/api/v1/academics/rooms/${editingRoom.value.id}`, editRoomForm.value)
+    notifySuccess('Room Updated', `Facility room "${editRoomForm.value.room_number}" updated successfully.`)
+    editRoomDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Room Error', errorObj.message || 'Could not update facility room.')
+  } finally {
+    editRoomSubmitting.value = false
+  }
+}
+
+async function handleDeleteRoom(room?: any) {
+  const target = room || editingRoom.value
+  if (!target) return
+
+  const confirmed = window.confirm(`Are you sure you want to remove room "${target.room_number}" (${target.building_name})? This will unassign it from any allocated class sections.`)
+  if (!confirmed) return
+
+  try {
+    await api.delete(`/api/v1/academics/rooms/${target.id}`)
+    notifySuccess('Room Removed', `Room "${target.room_number}" has been removed.`)
+    if (editRoomDialogVisible.value && editingRoom.value?.id === target.id) {
+      editRoomDialogVisible.value = false
+    }
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Delete Error', errorObj.message || 'Could not remove facility room.')
+  }
+}
+
 onMounted(() => {
   fetchAcademicData()
 })
@@ -940,6 +1012,29 @@ onMounted(() => {
         <Column field="capacity" header="Student Capacity" style="width: 140px">
           <template #body="{ data }">
             <span class="font-mono font-semibold">{{ data.capacity }} Seats</span>
+          </template>
+        </Column>
+        <Column header="Actions" style="width: 140px">
+          <template #body="{ data }">
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                class="clean-session-edit-btn"
+                @click="openEditRoomModal(data)"
+                title="Edit Facility Room"
+              >
+                <i class="pi pi-pencil text-xs"></i>
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                class="term-row-edit-action text-rose-500 hover:text-rose-700 hover:bg-rose-50 hover:border-rose-200"
+                @click="handleDeleteRoom(data)"
+                title="Delete Room"
+              >
+                <i class="pi pi-trash text-xs"></i>
+              </button>
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -2460,6 +2555,242 @@ onMounted(() => {
             <i v-else class="pi pi-check text-xs"></i>
             <span>{{ roomSubmitting ? 'Registering Room...' : 'Register Room' }}</span>
           </button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Edit Room Dialog -->
+    <Dialog
+      v-model:visible="editRoomDialogVisible"
+      modal
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="room-edit-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-amber-100 text-amber-800">
+            <i class="pi pi-pencil"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Campus Facility Room</h2>
+              <span class="badge-institutional">Infrastructure</span>
+            </div>
+            <p class="modal-subtitle">Modify room code, building block, facility type, or seat capacity</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateRoom" class="flex flex-col gap-4 pt-1">
+        <!-- Room Identifier with Lead Icon & Quick Presets -->
+        <FormField id="edit_rm_no" label="Room Identifier / Number" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-hashtag field-icon text-indigo-600"></i>
+            <input
+              id="edit_rm_no"
+              v-model="editRoomForm.room_number"
+              type="text"
+              placeholder="e.g. Room-101, Lab-302, Aud-1"
+              class="clean-input font-mono font-bold uppercase"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('Room 101', 'CLASSROOM', 45)"
+            >
+              Room 101
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('Room 201', 'CLASSROOM', 45)"
+            >
+              Room 201
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('Physics Lab', 'LAB_PHYSICS', 40, 'Science Block')"
+            >
+              Physics Lab
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('Chemistry Lab', 'LAB_CHEMISTRY', 40, 'Science Block')"
+            >
+              Chemistry Lab
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('ICT Lab', 'LAB_ICT', 40, 'ICT Complex')"
+            >
+              ICT Lab
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditRoomPreset('Auditorium Hall', 'AUDITORIUM', 150, 'Main Academic Complex')"
+            >
+              Auditorium
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Building / Wing with Lead Icon & Quick Presets -->
+        <FormField id="edit_rm_bld" label="Campus Building / Wing" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-building field-icon text-emerald-600"></i>
+            <input
+              id="edit_rm_bld"
+              v-model="editRoomForm.building_name"
+              type="text"
+              placeholder="e.g. Main Academic Complex, Science Block"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Complex:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="editRoomForm.building_name = 'Main Academic Complex'"
+            >
+              Main Complex
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="editRoomForm.building_name = 'Science Block'"
+            >
+              Science Block
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="editRoomForm.building_name = 'Administrative Wing'"
+            >
+              Admin Wing
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="editRoomForm.building_name = 'ICT Complex'"
+            >
+              ICT Complex
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Room Function Type & Seating Capacity Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="edit_rm_type" label="Facility Function / Type" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-sliders-h field-icon text-amber-600"></i>
+              <select
+                id="edit_rm_type"
+                v-model="editRoomForm.room_type"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="CLASSROOM">Classroom</option>
+                <option value="LAB_PHYSICS">Physics Laboratory</option>
+                <option value="LAB_CHEMISTRY">Chemistry Laboratory</option>
+                <option value="LAB_ICT">ICT Computer Suite</option>
+                <option value="AUDITORIUM">Auditorium / Hall</option>
+              </select>
+            </div>
+          </FormField>
+
+          <FormField id="edit_rm_cap" label="Seating Capacity" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-users field-icon text-teal-600"></i>
+              <input
+                id="edit_rm_cap"
+                v-model.number="editRoomForm.capacity"
+                type="number"
+                min="1"
+                max="500"
+                placeholder="45"
+                class="clean-input font-mono font-semibold"
+                required
+              />
+            </div>
+            <div class="quick-presets">
+              <span class="preset-label">Seats:</span>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="editRoomForm.capacity = 35"
+              >
+                35
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="editRoomForm.capacity = 40"
+              >
+                40
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="editRoomForm.capacity = 45"
+              >
+                45
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="editRoomForm.capacity = 50"
+              >
+                50
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="editRoomForm.capacity = 120"
+              >
+                120
+              </button>
+            </div>
+          </FormField>
+        </div>
+
+        <!-- Clean Modal Action Footer with Delete Option -->
+        <div class="flex items-center justify-between gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg transition-colors flex items-center gap-1.5"
+            @click="handleDeleteRoom()"
+          >
+            <i class="pi pi-trash"></i>
+            <span>Delete Room</span>
+          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="modal-btn-cancel"
+              @click="editRoomDialogVisible = false"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="editRoomSubmitting"
+              class="modal-btn-primary"
+            >
+              <i v-if="editRoomSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+              <i v-else class="pi pi-check text-xs"></i>
+              <span>{{ editRoomSubmitting ? 'Saving Changes...' : 'Save Changes' }}</span>
+            </button>
+          </div>
         </div>
       </form>
     </Dialog>
