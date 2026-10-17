@@ -183,6 +183,58 @@ function selectWithdrawSuggestion(label: string) {
   withdrawForm.value.reason = label
 }
 
+// Change Status Dialog
+const statusDialogVisible = ref(false)
+const updatingStatus = ref(false)
+const statusTargetStudent = ref<StudentRecord | null>(null)
+const statusForm = ref({
+  status: 'ACTIVE',
+  remarks: '',
+})
+const statusOptionsList = [
+  {
+    value: 'ACTIVE',
+    label: 'Active Enrolled',
+    description: 'Student is actively enrolled, attending classes, and included in academic records & routine monthly fee invoices.',
+    icon: 'pi pi-check-circle',
+    iconColor: 'text-emerald-600',
+    activeBorder: 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-400/30',
+  },
+  {
+    value: 'INACTIVE',
+    label: 'Inactive / On Leave',
+    description: 'Student is temporarily inactive, on leave of absence, suspended, or withdrawn from classes.',
+    icon: 'pi pi-pause-circle',
+    iconColor: 'text-slate-600',
+    activeBorder: 'border-slate-500 bg-slate-50/70 ring-2 ring-slate-400/30',
+  },
+  {
+    value: 'TRANSFERRED_OUT',
+    label: 'Transferred Out',
+    description: 'Student has formally departed to another educational institution with institutional transfer clearance.',
+    icon: 'pi pi-external-link',
+    iconColor: 'text-blue-600',
+    activeBorder: 'border-blue-500 bg-blue-50/50 ring-2 ring-blue-400/30',
+  },
+  {
+    value: 'GRADUATED',
+    label: 'Graduated Alumnus',
+    description: 'Student has completed all institutional grade levels and graduated from Evergreen Academy.',
+    icon: 'pi pi-graduation-cap',
+    iconColor: 'text-purple-600',
+    activeBorder: 'border-purple-500 bg-purple-50/50 ring-2 ring-purple-400/30',
+  },
+]
+
+const statusRemarksSuggestions = [
+  'Reactivation / Resumed Studies',
+  'Approved Medical Leave',
+  'Personal / Family Request',
+  'Transferred to Another School',
+  'Completed Graduation Requirements',
+  'Administrative Record Correction',
+]
+
 // Batch Promotion Dialog
 const promoteDialogVisible = ref(false)
 const promoting = ref(false)
@@ -418,6 +470,52 @@ async function handleExecuteWithdraw() {
     notifyError('Withdrawal Failed', errorObj.message || 'Could not withdraw student.')
   } finally {
     withdrawing.value = false
+  }
+}
+
+function openStatusModal(student: StudentRecord) {
+  statusTargetStudent.value = student
+  statusForm.value = {
+    status: student.status || 'ACTIVE',
+    remarks: '',
+  }
+  statusDialogVisible.value = true
+}
+
+async function handleUpdateStatus() {
+  if (!statusTargetStudent.value) return
+  try {
+    updatingStatus.value = true
+    const payload: { status: string; remarks?: string } = {
+      status: statusForm.value.status,
+    }
+    const { data } = await api.put(`/api/v1/students/${statusTargetStudent.value.id}`, payload)
+
+    const updatedStatus = statusForm.value.status
+    const targetId = statusTargetStudent.value.id
+
+    // Update in students list
+    const idx = students.value.findIndex((s) => s.id === targetId)
+    if (idx !== -1) {
+      students.value[idx].status = updatedStatus
+    }
+
+    // Update in selectedStudent if currently open
+    if (selectedStudent.value && selectedStudent.value.id === targetId) {
+      selectedStudent.value.status = updatedStatus
+      if (data.data?.current_enrollment) {
+        selectedStudent.value.enrollment = data.data.current_enrollment
+      }
+    }
+
+    notifySuccess('Status Updated', `Student institutional status successfully changed to ${updatedStatus}.`)
+    statusDialogVisible.value = false
+    await fetchStudents(currentPage.value)
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string }
+    notifyError('Update Failed', errorObj.message || 'Failed to update student status.')
+  } finally {
+    updatingStatus.value = false
   }
 }
 
@@ -689,13 +787,21 @@ onMounted(async () => {
           </template>
         </Column>
 
-        <Column header="Status" style="width: 110px">
+        <Column header="Status" style="width: 130px">
           <template #body="{ data }">
-            <StatusBadge :status="data.status" showDot />
+            <button
+              type="button"
+              class="group flex items-center gap-1.5 p-1 -m-1 rounded-lg hover:bg-slate-100 transition-all cursor-pointer border border-transparent hover:border-slate-200"
+              title="Click to change student institutional status"
+              @click="openStatusModal(data)"
+            >
+              <StatusBadge :status="data.status" showDot />
+              <i class="pi pi-pencil text-[10px] text-slate-400 group-hover:text-slate-700 opacity-60 group-hover:opacity-100 transition-opacity"></i>
+            </button>
           </template>
         </Column>
 
-        <Column header="Actions" style="width: 150px" alignFrozen="right">
+        <Column header="Actions" style="width: 175px" alignFrozen="right">
           <template #body="{ data }">
             <div class="flex items-center gap-1">
               <Button
@@ -706,6 +812,15 @@ onMounted(async () => {
                 aria-label="View Student Profile"
                 v-tooltip.top="'View Profile & History'"
                 @click="handleViewStudent(data.id)"
+              />
+              <Button
+                icon="pi pi-user-edit"
+                text
+                rounded
+                severity="warn"
+                aria-label="Change Status"
+                v-tooltip.top="'Change Student Status'"
+                @click="openStatusModal(data)"
               />
               <Button
                 v-if="data.status === 'ACTIVE'"
@@ -753,7 +868,17 @@ onMounted(async () => {
               <span class="student-uid-badge font-mono font-bold text-xs" title="Click to copy UID" @click="copyToClipboard(selectedStudent.student_uid)">
                 <i class="pi pi-copy text-[10px] mr-1"></i>{{ selectedStudent.student_uid }}
               </span>
-              <StatusBadge :status="selectedStudent.status" size="small" showDot />
+              <button
+                type="button"
+                class="group inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg hover:bg-slate-100 border border-slate-200/80 hover:border-slate-300 transition-all cursor-pointer"
+                title="Click to change student institutional status"
+                @click="openStatusModal(selectedStudent)"
+              >
+                <StatusBadge :status="selectedStudent.status" size="small" showDot />
+                <span class="text-[10px] text-slate-500 group-hover:text-slate-900 font-semibold uppercase flex items-center gap-0.5">
+                  <i class="pi pi-pencil text-[9px]"></i>Change
+                </span>
+              </button>
             </div>
             <p class="modal-subtitle text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>Official SIS Student Dossier</span>
@@ -912,8 +1037,15 @@ onMounted(async () => {
 
             <div class="info-cell bg-slate-50/80 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
               <span class="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-1">Institutional Status</span>
-              <div class="mt-0.5">
+              <div class="mt-0.5 flex items-center justify-between gap-2">
                 <StatusBadge :status="selectedStudent.status" size="small" showDot />
+                <button
+                  type="button"
+                  class="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                  @click="openStatusModal(selectedStudent)"
+                >
+                  <i class="pi pi-user-edit text-[11px]"></i> Edit Status
+                </button>
               </div>
             </div>
 
@@ -1153,13 +1285,23 @@ onMounted(async () => {
             <span class="text-slate-400">Institutional UID:</span>
             <strong class="text-slate-800 font-bold bg-slate-100 px-2.5 py-1 rounded border border-slate-200">{{ selectedStudent.student_uid }}</strong>
           </div>
-          <Button
-            label="Close Profile"
-            severity="secondary"
-            outlined
-            class="px-6 py-2 font-semibold text-xs rounded-lg"
-            @click="detailsDialogVisible = false"
-          />
+          <div class="flex items-center gap-2">
+            <Button
+              label="Change Status"
+              icon="pi pi-user-edit"
+              severity="warn"
+              outlined
+              class="px-4 py-2 font-semibold text-xs rounded-lg"
+              @click="openStatusModal(selectedStudent)"
+            />
+            <Button
+              label="Close Profile"
+              severity="secondary"
+              outlined
+              class="px-6 py-2 font-semibold text-xs rounded-lg"
+              @click="detailsDialogVisible = false"
+            />
+          </div>
         </div>
       </div>
     </Dialog>
@@ -1633,6 +1775,148 @@ onMounted(async () => {
       </form>
     </Dialog>
 
+    <!-- Change Student Institutional Status Modal -->
+    <Dialog
+      v-model:visible="statusDialogVisible"
+      modal
+      :style="{ width: '620px', maxWidth: '96vw' }"
+      class="clean-workflow-dialog"
+    >
+      <template #header>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 shadow-xs">
+            <i class="pi pi-user-edit text-lg"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-800 leading-snug">Change Student Institutional Status</h3>
+            <p class="text-xs text-slate-500">Modify active standing, reinstate, or record formal departure</p>
+          </div>
+        </div>
+      </template>
+
+      <form v-if="statusTargetStudent" @submit.prevent="handleUpdateStatus" class="flex flex-col gap-5 pt-2">
+        <!-- Student Summary Card -->
+        <div class="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-full bg-slate-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+                {{ getInitials(statusTargetStudent.name) }}
+              </div>
+              <div class="min-w-0">
+                <h4 class="font-bold text-slate-800 text-sm truncate leading-snug">
+                  {{ statusTargetStudent.name }}
+                </h4>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="font-mono text-xs text-slate-500 font-medium">UID: {{ statusTargetStudent.student_uid }}</span>
+                  <span class="text-xs text-slate-500">
+                    {{ statusTargetStudent.enrollment?.class || 'Class' }} &bull; {{ statusTargetStudent.enrollment?.section || 'Section' }} (Roll #{{ statusTargetStudent.enrollment?.roll_number || '—' }})
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider mb-0.5">Current Status</span>
+              <StatusBadge :status="statusTargetStudent.status" showDot size="small" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Select New Status Section -->
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2.5">
+            Select New Institutional Status <span class="text-red-500">*</span>
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div
+              v-for="opt in statusOptionsList"
+              :key="opt.value"
+              class="status-option-card cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between"
+              :class="statusForm.status === opt.value
+                ? opt.activeBorder + ' shadow-xs'
+                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70'"
+              @click="statusForm.status = opt.value"
+            >
+              <div class="flex items-start gap-3">
+                <div
+                  class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+                  :class="statusForm.status === opt.value ? 'bg-slate-900 text-white' : 'bg-slate-100 ' + opt.iconColor"
+                >
+                  <i :class="[opt.icon, 'text-sm']"></i>
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-sm block" :class="statusForm.status === opt.value ? 'text-slate-900' : 'text-slate-800'">
+                      {{ opt.label }}
+                    </span>
+                  </div>
+                  <span class="text-xs text-slate-500 leading-relaxed block mt-1">
+                    {{ opt.description }}
+                  </span>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-200/60 text-[11px] font-semibold"
+                :class="statusForm.status === opt.value ? 'text-slate-900' : 'text-slate-400'"
+              >
+                <i :class="statusForm.status === opt.value ? 'pi pi-check-circle text-emerald-600 font-bold' : 'pi pi-circle'"></i>
+                <span>{{ statusForm.status === opt.value ? 'Selected Status' : 'Click to select' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Optional Reason / Remarks -->
+        <div class="space-y-2">
+          <FormField id="status_remarks" label="Reason for Status Change / Administrative Note">
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <i class="pi pi-comment text-xs"></i>
+              </span>
+              <InputText
+                id="status_remarks"
+                v-model="statusForm.remarks"
+                placeholder="e.g. Resumed studies after medical leave, granted transfer certificate..."
+                class="w-full font-medium pl-8"
+              />
+            </div>
+          </FormField>
+
+          <!-- Suggestions -->
+          <div class="flex flex-wrap gap-1.5 pt-0.5">
+            <span class="text-[11px] text-slate-400 font-medium mr-1 flex items-center">
+              <i class="pi pi-bolt text-indigo-500 text-[10px] mr-1"></i> Suggestions:
+            </span>
+            <button
+              v-for="sug in statusRemarksSuggestions"
+              :key="sug"
+              type="button"
+              class="px-2.5 py-1 text-[11px] font-medium rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 transition-colors"
+              @click="statusForm.remarks = sug"
+            >
+              {{ sug }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="flex items-center justify-between gap-3 pt-3 border-t border-slate-200">
+          <Button
+            label="Cancel"
+            severity="secondary"
+            text
+            @click="statusDialogVisible = false"
+          />
+          <Button
+            type="submit"
+            label="Save Status Changes"
+            icon="pi pi-check"
+            :loading="updatingStatus"
+            class="brand-gradient-bg border-none px-6 py-2"
+          />
+        </div>
+      </form>
+    </Dialog>
+
     <!-- Batch Promotion Modal -->
     <Dialog
       v-model:visible="promoteDialogVisible"
@@ -2100,6 +2384,14 @@ onMounted(async () => {
 }
 
 .transfer-type-card:hover {
+  transform: translateY(-1.5px);
+}
+
+.status-option-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.status-option-card:hover {
   transform: translateY(-1.5px);
 }
 
