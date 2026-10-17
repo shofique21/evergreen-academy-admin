@@ -427,6 +427,18 @@ async function handleCreateSection() {
   }
 }
 
+function applySubjectPreset(name: string, code: string, hasPractical = false, type = 'COMPULSORY') {
+  subjectForm.value.name = name
+  subjectForm.value.code = code
+  subjectForm.value.has_practical = hasPractical
+  subjectForm.value.type = type
+}
+
+function applyMarksPreset(fullMarks: number, passMarks: number) {
+  subjectForm.value.full_marks = fullMarks
+  subjectForm.value.pass_marks = passMarks
+}
+
 function openAddSubjectModal(classId?: number) {
   subjectForm.value = {
     class_id: classId || classStructures.value[0]?.id || '',
@@ -1610,48 +1622,248 @@ onMounted(() => {
     </Dialog>
 
     <!-- Create Subject Dialog -->
-    <Dialog v-model:visible="subjectDialogVisible" modal header="Add Subject to Curriculum" :style="{ width: '480px' }">
-      <form @submit.prevent="handleCreateSubject" class="flex flex-col gap-4 pt-2">
-        <FormField id="sub_class" label="Class Level" required>
-          <select id="sub_class" v-model="subjectForm.class_id" class="custom-select w-full" required>
-            <option v-for="c in classStructures" :key="c.id" :value="c.id">{{ c.grade }}</option>
-          </select>
-        </FormField>
+    <Dialog
+      v-model:visible="subjectDialogVisible"
+      modal
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="subject-create-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-indigo-100 text-indigo-700">
+            <i class="pi pi-book"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Add Subject to Curriculum</h2>
+              <span class="badge-institutional">Curriculum Unit</span>
+            </div>
+            <p class="modal-subtitle">Define curricular subject, syllabus code, mark distribution, and practical credits</p>
+          </div>
+        </div>
+      </template>
 
-        <FormField id="sub_name" label="Subject Title" required>
-          <InputText id="sub_name" v-model="subjectForm.name" placeholder="e.g. Higher Mathematics, Physics" class="w-full" required />
-        </FormField>
-
-        <div class="grid grid-cols-2 gap-3">
-          <FormField id="sub_code" label="Subject Code" required>
-            <InputText id="sub_code" v-model="subjectForm.code" placeholder="e.g. PHY-101" class="w-full font-mono" required />
-          </FormField>
-          <FormField id="sub_type" label="Classification" required>
-            <select id="sub_type" v-model="subjectForm.type" class="custom-select w-full">
-              <option value="COMPULSORY">Compulsory</option>
-              <option value="ELECTIVE">Elective</option>
-              <option value="OPTIONAL_4TH">4th Optional</option>
+      <form @submit.prevent="handleCreateSubject" class="flex flex-col gap-4 pt-1">
+        <!-- Target Class Level -->
+        <FormField id="sub_class" label="Target Grade / Class Level" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-graduation-cap field-icon text-emerald-600"></i>
+            <select
+              id="sub_class"
+              v-model="subjectForm.class_id"
+              class="clean-input font-semibold"
+              required
+            >
+              <option value="" disabled>Select academic grade level...</option>
+              <option v-for="c in classStructures" :key="c.id" :value="c.id">
+                {{ c.grade }} (Level #{{ c.numeric_level }})
+              </option>
             </select>
+          </div>
+        </FormField>
+
+        <!-- Subject Title with Lead Icon & Quick Presets -->
+        <FormField id="sub_name" label="Subject Title / Course Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon text-indigo-600"></i>
+            <input
+              id="sub_name"
+              v-model="subjectForm.name"
+              type="text"
+              placeholder="e.g. Higher Mathematics, Physics, Bangla"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySubjectPreset('Bangla', 'BAN-101', false, 'COMPULSORY')"
+            >
+              Bangla
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySubjectPreset('English', 'ENG-102', false, 'COMPULSORY')"
+            >
+              English
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySubjectPreset('Mathematics', 'MTH-103', false, 'COMPULSORY')"
+            >
+              Mathematics
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySubjectPreset('Physics', 'PHY-105', true, 'ELECTIVE')"
+            >
+              Physics
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySubjectPreset('Chemistry', 'CHM-106', true, 'ELECTIVE')"
+            >
+              Chemistry
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySubjectPreset('ICT', 'ICT-107', true, 'COMPULSORY')"
+            >
+              ICT
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Subject Code & Curriculum Classification Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="sub_code" label="Subject Code" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-tag field-icon text-teal-600"></i>
+              <input
+                id="sub_code"
+                v-model="subjectForm.code"
+                type="text"
+                placeholder="e.g. PHY-101"
+                class="clean-input font-mono uppercase"
+                required
+              />
+            </div>
+          </FormField>
+
+          <FormField id="sub_type" label="Classification" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-sliders-h field-icon text-amber-600"></i>
+              <select
+                id="sub_type"
+                v-model="subjectForm.type"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="COMPULSORY">Compulsory (Core)</option>
+                <option value="ELECTIVE">Elective (Track)</option>
+                <option value="OPTIONAL_4TH">4th Optional</option>
+              </select>
+            </div>
           </FormField>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <FormField id="sub_full" label="Full Marks" required>
-            <input id="sub_full" v-model.number="subjectForm.full_marks" type="number" min="10" max="200" class="custom-number-input p-inputtext w-full font-mono" required />
-          </FormField>
-          <FormField id="sub_pass" label="Pass Marks" required>
-            <input id="sub_pass" v-model.number="subjectForm.pass_marks" type="number" min="1" max="100" class="custom-number-input p-inputtext w-full font-mono" required />
-          </FormField>
+        <!-- Full Marks & Pass Marks Grid with Quick Mark Presets -->
+        <div>
+          <div class="grid grid-cols-2 gap-3.5">
+            <FormField id="sub_full" label="Full Marks" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-star field-icon text-amber-500"></i>
+                <input
+                  id="sub_full"
+                  v-model.number="subjectForm.full_marks"
+                  type="number"
+                  min="10"
+                  max="200"
+                  placeholder="100"
+                  class="clean-input font-mono"
+                  required
+                />
+              </div>
+            </FormField>
+
+            <FormField id="sub_pass" label="Pass Marks" required>
+              <div class="clean-field-wrap">
+                <i class="pi pi-check-circle field-icon text-emerald-600"></i>
+                <input
+                  id="sub_pass"
+                  v-model.number="subjectForm.pass_marks"
+                  type="number"
+                  min="1"
+                  max="100"
+                  placeholder="33"
+                  class="clean-input font-mono"
+                  required
+                />
+              </div>
+            </FormField>
+          </div>
+
+          <div class="quick-presets">
+            <span class="preset-label">Weighting:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyMarksPreset(100, 33)"
+            >
+              100 / 33 Pass
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyMarksPreset(50, 17)"
+            >
+              50 / 17 Pass
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyMarksPreset(75, 25)"
+            >
+              75 / 25 Pass
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyMarksPreset(25, 8)"
+            >
+              25 / 8 Pass
+            </button>
+          </div>
         </div>
 
-        <label class="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer mt-1">
-          <input type="checkbox" v-model="subjectForm.has_practical" class="w-4 h-4 cursor-pointer" />
-          Includes Practical / Laboratory Evaluation
-        </label>
+        <!-- Interactive Practical / Laboratory Evaluation Toggle Card -->
+        <div class="pt-0.5">
+          <label class="feature-toggle-card" :class="{ selected: subjectForm.has_practical }">
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                v-model="subjectForm.has_practical"
+                class="custom-toggle-checkbox"
+              />
+              <div class="flex flex-col gap-0.5">
+                <span class="toggle-card-title flex items-center gap-1.5">
+                  <i class="pi pi-compass text-sm text-indigo-600"></i>
+                  Includes Practical / Laboratory Evaluation
+                </span>
+                <span class="toggle-card-desc">
+                  Enables continuous lab experiment assessments, practical exam grading rubrics, and lab credit weighting.
+                </span>
+              </div>
+            </div>
+          </label>
+        </div>
 
-        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="subjectDialogVisible = false" />
-          <Button type="submit" label="Save Subject" icon="pi pi-check" :loading="subjectSubmitting" class="brand-gradient-bg border-none" />
+        <!-- Clean Modal Action Footer -->
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="modal-btn-cancel"
+            @click="subjectDialogVisible = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            :disabled="subjectSubmitting"
+            class="modal-btn-primary"
+          >
+            <i v-if="subjectSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+            <i v-else class="pi pi-check text-xs"></i>
+            <span>{{ subjectSubmitting ? 'Registering Subject...' : 'Register Subject' }}</span>
+          </button>
         </div>
       </form>
     </Dialog>
