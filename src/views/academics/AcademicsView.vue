@@ -98,6 +98,12 @@ const sessionForm = ref({
   create_default_terms: true,
 })
 
+function applySessionPreset(startYear: number, endYear: number) {
+  sessionForm.value.name = `Session ${startYear}-${endYear}`
+  sessionForm.value.start_date = `${startYear}-01-01`
+  sessionForm.value.end_date = `${endYear}-12-31`
+}
+
 const termDialogVisible = ref(false)
 const termSubmitting = ref(false)
 const selectedSessionForTerm = ref<AcademicSessionRow | null>(null)
@@ -626,35 +632,147 @@ onMounted(() => {
     </div>
 
     <!-- Create Session Dialog -->
-    <Dialog v-model:visible="sessionDialogVisible" modal header="Create Academic Session" :style="{ width: '480px' }">
-      <form @submit.prevent="handleCreateSession" class="flex flex-col gap-4 pt-2">
-        <FormField id="session_name" label="Session Name" required>
-          <InputText id="session_name" v-model="sessionForm.name" placeholder="e.g. Session 2027-2028" class="w-full" required />
+    <Dialog
+      v-model:visible="sessionDialogVisible"
+      modal
+      :style="{ width: '560px', maxWidth: '96vw' }"
+      class="session-create-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon">
+            <i class="pi pi-calendar-plus"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Create Academic Session</h2>
+              <span class="badge-institutional">Academic Calendar</span>
+            </div>
+            <p class="modal-subtitle">Configure session timeframe and Bangladesh NCTB examination terms</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleCreateSession" class="flex flex-col gap-4 pt-1">
+        <!-- Session Name with Lead Icon & Quick Presets -->
+        <FormField id="session_name" label="Session Title / Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon"></i>
+            <input
+              id="session_name"
+              v-model="sessionForm.name"
+              type="text"
+              placeholder="e.g. Session 2026-2027"
+              class="clean-input"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySessionPreset(2026, 2027)"
+            >
+              2026–2027
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySessionPreset(2027, 2028)"
+            >
+              2027–2028
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applySessionPreset(2028, 2029)"
+            >
+              2028–2029
+            </button>
+          </div>
         </FormField>
 
-        <div class="grid grid-cols-2 gap-3">
-          <FormField id="start_date" label="Start Date" required>
-            <InputText id="start_date" v-model="sessionForm.start_date" type="date" class="w-full font-mono" required />
+        <!-- Date Range Grid with Clean Lead Icons -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="start_date" label="Session Start Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-plus field-icon text-emerald-600"></i>
+              <input
+                id="start_date"
+                v-model="sessionForm.start_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
           </FormField>
-          <FormField id="end_date" label="End Date" required>
-            <InputText id="end_date" v-model="sessionForm.end_date" type="date" class="w-full font-mono" required />
+
+          <FormField id="end_date" label="Session End Date" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-calendar-times field-icon text-amber-600"></i>
+              <input
+                id="end_date"
+                v-model="sessionForm.end_date"
+                type="date"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
           </FormField>
         </div>
 
-        <div class="flex flex-col gap-2 mt-2">
-          <label class="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
-            <input type="checkbox" v-model="sessionForm.is_current" class="w-4 h-4 cursor-pointer" />
-            Set as Current Active Session
+        <!-- Interactive Configuration Feature Cards -->
+        <div class="flex flex-col gap-2.5 pt-1">
+          <label class="feature-toggle-card" :class="{ selected: sessionForm.is_current }">
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                v-model="sessionForm.is_current"
+                class="custom-toggle-checkbox"
+              />
+              <div class="flex flex-col gap-0.5">
+                <span class="toggle-card-title">Set as Current Active Session</span>
+                <span class="toggle-card-desc">
+                  Designate as the live institutional session for attendance, student enrollment, and grading.
+                </span>
+              </div>
+            </div>
           </label>
-          <label class="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
-            <input type="checkbox" v-model="sessionForm.create_default_terms" class="w-4 h-4 cursor-pointer" />
-            Auto-generate Bangladesh NCTB Terms (1st, 2nd, Annual Term)
+
+          <label class="feature-toggle-card" :class="{ selected: sessionForm.create_default_terms }">
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                v-model="sessionForm.create_default_terms"
+                class="custom-toggle-checkbox"
+              />
+              <div class="flex flex-col gap-0.5">
+                <span class="toggle-card-title">Auto-generate NCTB Academic Terms</span>
+                <span class="toggle-card-desc">
+                  Automatically initializes 1st Term, 2nd Term, and Annual Examination periods.
+                </span>
+              </div>
+            </div>
           </label>
         </div>
 
-        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-200">
-          <Button label="Cancel" severity="secondary" text @click="sessionDialogVisible = false" />
-          <Button type="submit" label="Establish Session" icon="pi pi-check" :loading="sessionSubmitting" class="brand-gradient-bg border-none" />
+        <!-- Clean Modal Action Footer -->
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <Button
+            type="button"
+            label="Cancel"
+            severity="secondary"
+            outlined
+            @click="sessionDialogVisible = false"
+          />
+          <Button
+            type="submit"
+            label="Establish Academic Session"
+            icon="pi pi-check"
+            :loading="sessionSubmitting"
+            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+          />
         </div>
       </form>
     </Dialog>
@@ -885,5 +1003,183 @@ onMounted(() => {
 
 .custom-select:focus {
   border-color: #059669;
+}
+
+/* Create Academic Session Modal Clean Styling */
+.modal-header-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding-bottom: 0.25rem;
+}
+
+.modal-header-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(6, 95, 70, 0.12), rgba(16, 185, 129, 0.18));
+  color: #065f46;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.badge-institutional {
+  font-size: 0.675rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.55rem;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  border-radius: 9999px;
+}
+
+.modal-subtitle {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.clean-field-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.field-icon {
+  position: absolute;
+  left: 0.85rem;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  pointer-events: none;
+  z-index: 2;
+  transition: color 0.2s ease;
+}
+
+.clean-field-wrap:focus-within .field-icon {
+  color: #059669;
+}
+
+.clean-input {
+  width: 100%;
+  height: 42px;
+  padding: 0.55rem 0.85rem 0.55rem 2.45rem;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  color: #1e293b;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.clean-input:hover {
+  border-color: #94a3b8;
+}
+
+.clean-input:focus {
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
+  background: #ffffff;
+}
+
+.clean-input::placeholder {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.quick-presets {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.preset-label {
+  font-size: 0.725rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.preset-btn {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-btn:hover {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.feature-toggle-card {
+  display: block;
+  padding: 0.85rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.feature-toggle-card:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.feature-toggle-card.selected {
+  background: #f0fdf4;
+  border-color: #86efac;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.08);
+}
+
+.custom-toggle-checkbox {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+  accent-color: #059669;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.toggle-card-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.25;
+}
+
+.feature-toggle-card.selected .toggle-card-title {
+  color: #065f46;
+}
+
+.toggle-card-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.35;
 }
 </style>
