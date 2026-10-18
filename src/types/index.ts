@@ -477,6 +477,36 @@ export interface StaffProfile {
   campus?: Campus
 }
 
+export interface StaffAttendanceItem {
+  id?: number | null
+  staff_profile_id: number
+  employee_id: string
+  name: string
+  email?: string | null
+  phone?: string | null
+  department: string
+  designation: string
+  is_teacher: boolean
+  specialization_subject?: string | null
+  attendance_date: string
+  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'ON_LEAVE'
+  is_marked: boolean
+  in_time?: string | null
+  out_time?: string | null
+}
+
+export interface StaffAttendanceSummary {
+  date: string
+  total_staff: number
+  marked_count: number
+  present_count: number
+  late_count: number
+  half_day_count: number
+  on_leave_count: number
+  absent_count: number
+  present_rate: number
+}
+
 // Admissions Pipeline Types
 export interface AdmissionApplication {
   id: number

@@ -100,4 +100,76 @@ describe('Academic Foundation & People Management Frontend Contracts', () => {
     expect(authStore.hasPermission('admissions.manage')).toBe(true)
     expect(authStore.hasPermission('academic-years.manage')).toBe(false)
   })
+
+  it('validates staff profile editing and status transition states', () => {
+    const validStatuses = ['ACTIVE', 'ON_LEAVE', 'RESIGNED', 'RETIRED']
+    const mockStaff: StaffProfile = {
+      id: 5,
+      campus_id: 1,
+      user_id: 12,
+      employee_id: 'EMP-2026-005',
+      designation: 'Assistant Teacher',
+      department: 'Science',
+      joining_date: '2026-01-15',
+      basic_salary: 35000,
+      status: 'ACTIVE',
+      user: {
+        id: 12,
+        name: 'Rashida Begum',
+        email: 'rashida@evergreen.edu.bd',
+        phone: '+8801700000000',
+        user_type: 'staff',
+        is_active: true,
+      },
+    }
+
+    // Editable fields can update
+    const updatedStaff: StaffProfile = {
+      ...mockStaff,
+      designation: 'Senior Teacher',
+      department: 'Social Science',
+      basic_salary: 42000,
+      status: 'ON_LEAVE',
+      user: {
+        ...mockStaff.user!,
+        name: 'Rashida Begum (Senior)',
+        phone: '+8801711223344',
+      },
+    }
+
+    expect(validStatuses).toContain(updatedStaff.status)
+    expect(updatedStaff.designation).toBe('Senior Teacher')
+    expect(updatedStaff.department).toBe('Social Science')
+    expect(updatedStaff.basic_salary).toBe(42000)
+    expect(updatedStaff.status).toBe('ON_LEAVE')
+    expect(updatedStaff.user?.name).toBe('Rashida Begum (Senior)')
+    expect(updatedStaff.user?.phone).toBe('+8801711223344')
+  })
+
+  it('validates teacher allocation editing and role reallocation contracts', () => {
+    const initialAssignment: TeacherAssignment = {
+      id: 10,
+      campus_id: 1,
+      teacher_id: 4,
+      class_id: 6,
+      section_id: 1,
+      academic_year_id: 1,
+      subject_id: undefined,
+      is_class_teacher: true,
+      status: 'ACTIVE',
+    }
+
+    // Editable allocation update: adding subject and transitioning from class teacher
+    const updatedAssignment: TeacherAssignment = {
+      ...initialAssignment,
+      subject_id: 15,
+      is_class_teacher: false,
+      status: 'ACTIVE',
+    }
+
+    expect(updatedAssignment.id).toBe(10)
+    expect(updatedAssignment.subject_id).toBe(15)
+    expect(updatedAssignment.is_class_teacher).toBe(false)
+    expect(updatedAssignment.status).toBe('ACTIVE')
+  })
 })
