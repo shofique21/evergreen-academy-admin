@@ -457,6 +457,8 @@ export interface Teacher {
   staff_profile_id: number
   specialization_subject: string
   highest_degree: string
+  name?: string
+  is_on_leave?: boolean
   staffProfile?: StaffProfile
   staff_profile?: StaffProfile
   assignments?: TeacherAssignment[]
@@ -634,6 +636,7 @@ export interface TimetableSlot {
   room_id: number
   period_id: number
   day_of_week: number
+  is_teacher_on_leave?: boolean
   subject?: Subject
   teacher?: Teacher
   classroom?: Classroom
