@@ -34,7 +34,7 @@ const adminNavItems: NavMenuItem[] = [
   { label: 'Communications & Notices', icon: 'pi pi-megaphone', to: '/communications' },
   { label: 'Staff & Faculty', icon: 'pi pi-briefcase', to: '/staff', permission: 'staff.view' },
   { label: 'Users & Roles', icon: 'pi pi-user-plus', to: '/users', permission: 'users.view' },
-  { label: 'Fees & Billing', icon: 'pi pi-wallet', to: '/fees', permission: 'fees.collect' },
+  { label: 'Finance Management', icon: 'pi pi-wallet', to: '/fees', permission: 'fees.collect' },
   { label: 'Payments & Gateway', icon: 'pi pi-credit-card', to: '/payments' },
   { label: 'Notification Center', icon: 'pi pi-bell', to: '/notifications' },
   { label: 'Reports & Exports', icon: 'pi pi-file-excel', to: '/reports' },
