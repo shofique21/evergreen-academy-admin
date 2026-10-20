@@ -10,7 +10,6 @@ import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
-import InputText from 'primevue/inputtext'
 
 interface AcademicTerm {
   id: number
@@ -36,6 +35,7 @@ interface ClassStructureRow {
   id: number
   grade: string
   numeric_level: number
+  is_active?: boolean
   medium: string
   shifts: string
   sections: Array<{ id: number; name: string; capacity: number; room_number?: string | null }>
@@ -75,11 +75,14 @@ interface MediumItem {
 
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
 
-const activeTab = ref<'sessions' | 'classes' | 'subjects' | 'rooms'>('sessions')
+const activeTab = ref<'sessions' | 'class-levels' | 'classes' | 'subjects' | 'rooms'>('class-levels')
 const loading = ref(false)
 
 const sessions = ref<AcademicSessionRow[]>([])
 const classStructures = ref<ClassStructureRow[]>([])
+const totalSectionsCount = computed(() => {
+  return classStructures.value.reduce((acc, c) => acc + (c.sections?.length || 0), 0)
+})
 const subjectsList = ref<SubjectItem[]>([])
 const selectedSubjectClass = ref<number | ''>('')
 const filteredSubjectsList = computed(() => {
@@ -158,6 +161,183 @@ const editTermForm = ref({
   end_date: '',
   is_active: true,
 })
+
+// Class Level Modals State & CRUD Handlers
+const classDialogVisible = ref(false)
+const classSubmitting = ref(false)
+const classForm = ref({
+  campus_id: 1,
+  name: '',
+  numeric_level: 6,
+  is_active: true,
+})
+
+const editClassDialogVisible = ref(false)
+const editClassSubmitting = ref(false)
+const editingClass = ref<any | null>(null)
+const editClassForm = ref({
+  name: '',
+  numeric_level: 6,
+  is_active: true,
+})
+
+const batchClassSubmitting = ref(false)
+
+function applyClassPreset(name: string, level: number) {
+  classForm.value.name = name
+  classForm.value.numeric_level = level
+}
+
+function applyEditClassPreset(name: string, level: number) {
+  editClassForm.value.name = name
+  editClassForm.value.numeric_level = level
+}
+
+function openAddClassModal(presetName?: string, presetLevel?: number) {
+  const nextLevel = classStructures.value.length > 0
+    ? Math.max(...classStructures.value.map(c => c.numeric_level)) + 1
+    : 1
+  classForm.value = {
+    campus_id: 1,
+    name: presetName || '',
+    numeric_level: presetLevel !== undefined ? presetLevel : nextLevel,
+    is_active: true,
+  }
+  classDialogVisible.value = true
+}
+
+async function handleCreateClass() {
+  if (!classForm.value.name?.trim() || classForm.value.numeric_level === undefined || classForm.value.numeric_level === null) {
+    notifyWarn('Validation Required', 'Please provide class name and numeric level.')
+    return
+  }
+
+  try {
+    classSubmitting.value = true
+    await api.post('/api/v1/academics/classes', classForm.value)
+    notifySuccess('Class Created', `Class "${classForm.value.name}" (Level #${classForm.value.numeric_level}) created successfully.`)
+    classDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Class Error', errorObj.response?.data?.message || errorObj.message || 'Could not create class level.')
+  } finally {
+    classSubmitting.value = false
+  }
+}
+
+function openEditClassModal(classItem: any) {
+  editingClass.value = classItem
+  editClassForm.value = {
+    name: classItem.grade || classItem.name,
+    numeric_level: classItem.numeric_level,
+    is_active: classItem.is_active !== undefined ? Boolean(classItem.is_active) : true,
+  }
+  editClassDialogVisible.value = true
+}
+
+async function handleUpdateClass() {
+  if (!editingClass.value) return
+  if (!editClassForm.value.name?.trim() || editClassForm.value.numeric_level === undefined || editClassForm.value.numeric_level === null) {
+    notifyWarn('Validation Required', 'Please provide class name and numeric level.')
+    return
+  }
+
+  try {
+    editClassSubmitting.value = true
+    await api.put(`/api/v1/academics/classes/${editingClass.value.id}`, editClassForm.value)
+    notifySuccess('Class Updated', `Class "${editClassForm.value.name}" updated successfully.`)
+    editClassDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Class Error', errorObj.response?.data?.message || errorObj.message || 'Could not update class level.')
+  } finally {
+    editClassSubmitting.value = false
+  }
+}
+
+async function quickToggleClassStatus(classItem: any, event?: Event) {
+  if (event) event.stopPropagation()
+  try {
+    const newStatus = !classItem.is_active
+    await api.put(`/api/v1/academics/classes/${classItem.id}`, { is_active: newStatus })
+    notifySuccess('Status Updated', `Class "${classItem.grade}" is now ${newStatus ? 'ACTIVE' : 'INACTIVE'}.`)
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Status Error', errorObj.response?.data?.message || errorObj.message || 'Could not update class status.')
+  }
+}
+
+async function handleDeleteClass(classItem?: any) {
+  const target = classItem || editingClass.value
+  if (!target) return
+
+  const confirmed = window.confirm(`Are you sure you want to remove Class "${target.grade || target.name}"? This action cannot be reversed.`)
+  if (!confirmed) return
+
+  try {
+    await api.delete(`/api/v1/academics/classes/${target.id}`)
+    notifySuccess('Class Deleted', `Class "${target.grade || target.name}" has been deleted.`)
+    if (editClassDialogVisible.value && editingClass.value?.id === target.id) {
+      editClassDialogVisible.value = false
+    }
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Delete Error', errorObj.response?.data?.message || errorObj.message || 'Could not delete class.')
+  }
+}
+
+async function handleBatchGenerateNctb(group: 'PRIMARY' | 'SECONDARY' | 'ALL') {
+  let classesToCreate = []
+  if (group === 'PRIMARY') {
+    classesToCreate = [
+      { name: 'Class 1', numeric_level: 1 },
+      { name: 'Class 2', numeric_level: 2 },
+      { name: 'Class 3', numeric_level: 3 },
+      { name: 'Class 4', numeric_level: 4 },
+      { name: 'Class 5', numeric_level: 5 },
+    ]
+  } else if (group === 'SECONDARY') {
+    classesToCreate = [
+      { name: 'Class 6', numeric_level: 6 },
+      { name: 'Class 7', numeric_level: 7 },
+      { name: 'Class 8', numeric_level: 8 },
+      { name: 'Class 9', numeric_level: 9 },
+      { name: 'Class 10', numeric_level: 10 },
+    ]
+  } else {
+    classesToCreate = [
+      { name: 'Class 1', numeric_level: 1 },
+      { name: 'Class 2', numeric_level: 2 },
+      { name: 'Class 3', numeric_level: 3 },
+      { name: 'Class 4', numeric_level: 4 },
+      { name: 'Class 5', numeric_level: 5 },
+      { name: 'Class 6', numeric_level: 6 },
+      { name: 'Class 7', numeric_level: 7 },
+      { name: 'Class 8', numeric_level: 8 },
+      { name: 'Class 9', numeric_level: 9 },
+      { name: 'Class 10', numeric_level: 10 },
+    ]
+  }
+
+  try {
+    batchClassSubmitting.value = true
+    const { data } = await api.post('/api/v1/academics/classes/batch', {
+      campus_id: 1,
+      classes: classesToCreate,
+    })
+    notifySuccess('NCTB Classes Generated', data.message || 'Standard class levels created successfully.')
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Batch Error', errorObj.response?.data?.message || errorObj.message || 'Could not generate classes.')
+  } finally {
+    batchClassSubmitting.value = false
+  }
+}
 
 // Section Modal
 const sectionDialogVisible = ref(false)
@@ -243,6 +423,7 @@ async function fetchAcademicData() {
       id: c.id,
       grade: c.name,
       numeric_level: c.numeric_level,
+      is_active: c.is_active !== undefined ? Boolean(c.is_active) : true,
       medium: c.sections?.map((s: any) => s.medium?.name).filter(Boolean).join(', ') || 'Bangla & English',
       shifts: c.sections?.map((s: any) => s.shift?.name).filter(Boolean).join(' / ') || 'Morning / Day',
       sections: c.sections || [],
@@ -414,7 +595,7 @@ async function handleDeleteTerm() {
   }
 }
 
-async function quickToggleTermStatus(term: AcademicTerm, session?: AcademicSessionRow, event?: Event) {
+async function quickToggleTermStatus(term: AcademicTerm, _session?: AcademicSessionRow, event?: Event) {
   if (event) event.stopPropagation()
   try {
     const newStatus = !term.is_active
@@ -699,6 +880,35 @@ onMounted(() => {
     >
       <template #actions>
         <Button
+          v-if="activeTab === 'class-levels'"
+          label="Add Class Level"
+          icon="pi pi-plus-circle"
+          class="brand-gradient-bg border-none"
+          @click="openAddClassModal()"
+        />
+        <Button
+          v-else-if="activeTab === 'classes'"
+          label="Add Section"
+          icon="pi pi-plus"
+          class="brand-gradient-bg border-none"
+          @click="openAddSectionModal()"
+        />
+        <Button
+          v-else-if="activeTab === 'subjects'"
+          label="New Subject"
+          icon="pi pi-book"
+          class="brand-gradient-bg border-none"
+          @click="subjectDialogVisible = true"
+        />
+        <Button
+          v-else-if="activeTab === 'rooms'"
+          label="New Room"
+          icon="pi pi-building"
+          class="brand-gradient-bg border-none"
+          @click="openAddRoomModal()"
+        />
+        <Button
+          v-else
           label="New Academic Session"
           icon="pi pi-calendar-plus"
           class="brand-gradient-bg border-none"
@@ -726,10 +936,17 @@ onMounted(() => {
       </button>
       <button
         class="tab-pill"
+        :class="{ active: activeTab === 'class-levels' }"
+        @click="activeTab = 'class-levels'"
+      >
+        <i class="pi pi-th-large mr-1"></i> Class Levels ({{ classStructures.length }})
+      </button>
+      <button
+        class="tab-pill"
         :class="{ active: activeTab === 'classes' }"
         @click="activeTab = 'classes'"
       >
-        <i class="pi pi-sitemap mr-1"></i> NCTB Classes & Sections ({{ classStructures.length }})
+        <i class="pi pi-sitemap mr-1"></i> Sections & Arms ({{ totalSectionsCount }})
       </button>
       <button
         class="tab-pill"
@@ -849,7 +1066,193 @@ onMounted(() => {
       </DataTable>
     </div>
 
-    <!-- 2. NCTB Classes & Sections Panel -->
+    <!-- 2. Class Levels Registry & Creation Panel -->
+    <div v-if="activeTab === 'class-levels'" class="table-card glass-panel">
+      <div class="card-header flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="card-title">Class Levels & Academic Progression Hierarchy</h3>
+            <span class="badge-institutional">Grades & Curriculum</span>
+          </div>
+          <p class="card-subtitle">Manage progressive educational grade levels (Pre-Primary, Primary, Secondary, Higher Secondary)</p>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <Button
+            label="Generate NCTB Classes (1–10)"
+            icon="pi pi-bolt"
+            size="small"
+            severity="secondary"
+            outlined
+            :loading="batchClassSubmitting"
+            @click="handleBatchGenerateNctb('ALL')"
+            title="Automatically create standard Bangladesh NCTB Class 1 to Class 10"
+          />
+          <Button
+            label="Add Class Level"
+            icon="pi pi-plus"
+            size="small"
+            class="brand-gradient-bg border-none"
+            @click="openAddClassModal()"
+          />
+        </div>
+      </div>
+
+      <!-- Empty State when no classes exist -->
+      <div v-if="!loading && classStructures.length === 0" class="empty-classes-card">
+        <div class="empty-classes-icon">
+          <i class="pi pi-th-large"></i>
+        </div>
+        <h4 class="empty-classes-title">No Class Levels Configured Yet</h4>
+        <p class="empty-classes-desc">
+          Get started by adding your institution's grade levels. You can create custom classes or auto-generate the standard Bangladesh NCTB structure (Class 1 to 10) in one click.
+        </p>
+        <div class="flex items-center justify-center gap-3 mt-4 flex-wrap">
+          <Button
+            label="Quick Setup: Generate NCTB Classes (1–10)"
+            icon="pi pi-bolt"
+            class="brand-gradient-bg border-none font-semibold px-4 py-2"
+            :loading="batchClassSubmitting"
+            @click="handleBatchGenerateNctb('ALL')"
+          />
+          <Button
+            label="+ Add Custom Class Level"
+            icon="pi pi-plus"
+            severity="secondary"
+            outlined
+            class="font-semibold px-4 py-2"
+            @click="openAddClassModal()"
+          />
+        </div>
+
+        <div class="empty-classes-presets mt-6">
+          <span class="preset-label font-bold text-slate-500 text-xs">Or add single grade quickly:</span>
+          <div class="flex flex-wrap justify-center gap-2 mt-2">
+            <button
+              v-for="preset in [
+                { name: 'Play', level: 0 },
+                { name: 'Nursery', level: 0 },
+                { name: 'KG', level: 0 },
+                { name: 'Class 1', level: 1 },
+                { name: 'Class 2', level: 2 },
+                { name: 'Class 3', level: 3 },
+                { name: 'Class 4', level: 4 },
+                { name: 'Class 5', level: 5 },
+                { name: 'Class 6', level: 6 },
+                { name: 'Class 7', level: 7 },
+                { name: 'Class 8', level: 8 },
+                { name: 'Class 9', level: 9 },
+                { name: 'Class 10', level: 10 },
+                { name: 'Class 11', level: 11 },
+                { name: 'Class 12', level: 12 }
+              ]"
+              :key="preset.name"
+              type="button"
+              class="preset-btn px-2.5 py-1 text-xs"
+              @click="openAddClassModal(preset.name, preset.level)"
+            >
+              + {{ preset.name }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Table when classes exist -->
+      <DataTable
+        v-else
+        :value="classStructures"
+        :loading="loading"
+        responsiveLayout="scroll"
+        class="p-datatable-sm custom-table"
+      >
+        <Column field="numeric_level" header="Order Rank" style="width: 110px">
+          <template #body="{ data }">
+            <span class="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              Level #{{ data.numeric_level }}
+            </span>
+          </template>
+        </Column>
+
+        <Column field="grade" header="Class / Grade Name">
+          <template #body="{ data }">
+            <div class="flex items-center gap-2">
+              <i class="pi pi-graduation-cap text-emerald-600 text-sm"></i>
+              <span class="font-bold text-slate-900 text-sm">{{ data.grade }}</span>
+            </div>
+          </template>
+        </Column>
+
+        <Column header="Status" style="width: 140px">
+          <template #body="{ data }">
+            <button
+              type="button"
+              class="term-status-toggle-pill"
+              :class="data.is_active ? 'is-active' : 'is-inactive'"
+              title="Click to toggle status"
+              @click="quickToggleClassStatus(data)"
+            >
+              <span class="term-dot" :class="data.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+              <span>{{ data.is_active ? 'ACTIVE' : 'INACTIVE' }}</span>
+            </button>
+          </template>
+        </Column>
+
+        <Column header="Allocated Sections">
+          <template #body="{ data }">
+            <div v-if="data.sections && data.sections.length > 0" class="flex flex-wrap gap-1.5">
+              <span
+                v-for="s in data.sections"
+                :key="s.id"
+                class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200"
+              >
+                {{ s.name }} (Cap: {{ s.capacity }})
+              </span>
+            </div>
+            <span v-else class="text-xs text-slate-400 italic">No sections configured yet</span>
+          </template>
+        </Column>
+
+        <Column field="subjects_count" header="Curriculum" style="width: 130px">
+          <template #body="{ data }">
+            <Tag :value="`${data.subjects_count} Subjects`" :severity="data.subjects_count > 0 ? 'info' : 'secondary'" />
+          </template>
+        </Column>
+
+        <Column header="Actions" style="width: 220px">
+          <template #body="{ data }">
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                class="clean-session-term-btn"
+                @click="openAddSectionModal(data.id)"
+                title="Add Section to this class"
+              >
+                <i class="pi pi-plus text-xs"></i>
+                <span>Section</span>
+              </button>
+              <button
+                type="button"
+                class="clean-session-edit-btn"
+                @click="openEditClassModal(data)"
+                title="Edit Class Level"
+              >
+                <i class="pi pi-pencil text-xs"></i>
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                class="term-row-edit-action text-rose-500 hover:text-rose-700 hover:bg-rose-50 hover:border-rose-200"
+                @click="handleDeleteClass(data)"
+                title="Delete Class Level"
+              >
+                <i class="pi pi-trash text-xs"></i>
+              </button>
+            </div>
+          </template>
+        </Column>
+      </DataTable>
+    </div>
+
+    <!-- 3. NCTB Classes & Sections Panel -->
     <div v-if="activeTab === 'classes'" class="table-card glass-panel">
       <div class="card-header flex justify-between items-center flex-wrap gap-2">
         <div>
@@ -2868,6 +3271,253 @@ onMounted(() => {
         </div>
       </form>
     </Dialog>
+
+    <!-- Add Class Level Dialog -->
+    <Dialog
+      v-model:visible="classDialogVisible"
+      modal
+      :style="{ width: '520px', maxWidth: '96vw' }"
+      class="class-create-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-emerald-100 text-emerald-700">
+            <i class="pi pi-th-large"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Add Class Level</h2>
+              <span class="badge-institutional">Academic Structure</span>
+            </div>
+            <p class="modal-subtitle">Configure institutional grade level rank and curriculum tier</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleCreateClass" class="flex flex-col gap-4 pt-1">
+        <!-- Class Name with Quick Presets -->
+        <FormField id="class_name" label="Class / Grade Title" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-graduation-cap field-icon text-emerald-600"></i>
+            <input
+              id="class_name"
+              v-model="classForm.name"
+              type="text"
+              placeholder="e.g. Class 6, Grade 7, Play, Nursery"
+              class="clean-input font-bold"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              v-for="preset in [
+                { name: 'Class 6', level: 6 },
+                { name: 'Class 7', level: 7 },
+                { name: 'Class 8', level: 8 },
+                { name: 'Class 9', level: 9 },
+                { name: 'Class 10', level: 10 },
+                { name: 'Play', level: 0 },
+                { name: 'Nursery', level: 0 },
+                { name: 'KG', level: 0 }
+              ]"
+              :key="preset.name"
+              type="button"
+              class="preset-btn"
+              @click="applyClassPreset(preset.name, preset.level)"
+            >
+              {{ preset.name }}
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Numeric Level -->
+        <FormField id="class_numeric_level" label="Numeric Level Rank (Progression Order)" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-sort-numeric-up field-icon text-indigo-600"></i>
+            <input
+              id="class_numeric_level"
+              v-model.number="classForm.numeric_level"
+              type="number"
+              min="0"
+              max="12"
+              placeholder="e.g. 6"
+              class="clean-input font-mono font-semibold"
+              required
+            />
+          </div>
+          <p class="text-xs text-slate-500 mt-1">
+            Used for academic standing sequencing and promotional progression (e.g. 0 for Pre-primary, 6 for Class 6, 10 for SSC).
+          </p>
+        </FormField>
+
+        <!-- Status Toggle -->
+        <div class="pt-1">
+          <label class="toggle-card">
+            <div class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                v-model="classForm.is_active"
+                class="custom-toggle-checkbox"
+              />
+              <div class="flex flex-col gap-0.5">
+                <span class="toggle-card-title flex items-center gap-1.5">
+                  <i class="pi pi-check-circle text-sm text-emerald-600"></i>
+                  Active Institutional Grade Level
+                </span>
+                <span class="toggle-card-desc">
+                  Active classes appear in student admissions, subject curriculum, and timetables.
+                </span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Clean Modal Action Footer -->
+        <div class="flex justify-end gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="modal-btn-cancel"
+            @click="classDialogVisible = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            :disabled="classSubmitting"
+            class="modal-btn-primary"
+          >
+            <i v-if="classSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+            <i v-else class="pi pi-check text-xs"></i>
+            <span>{{ classSubmitting ? 'Creating Class...' : 'Create Class Level' }}</span>
+          </button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Edit Class Level Dialog -->
+    <Dialog
+      v-model:visible="editClassDialogVisible"
+      modal
+      :style="{ width: '520px', maxWidth: '96vw' }"
+      class="class-edit-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-amber-100 text-amber-800">
+            <i class="pi pi-pencil"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Class Level</h2>
+              <span class="badge-institutional">{{ editingClass?.grade || editingClass?.name }}</span>
+            </div>
+            <p class="modal-subtitle">Modify class naming, progression level, or operational status</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateClass" class="flex flex-col gap-4 pt-1">
+        <FormField id="edit_class_name" label="Class / Grade Title" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-graduation-cap field-icon text-emerald-600"></i>
+            <input
+              id="edit_class_name"
+              v-model="editClassForm.name"
+              type="text"
+              placeholder="e.g. Class 6"
+              class="clean-input font-bold"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              v-for="preset in [
+                { name: 'Class 6', level: 6 },
+                { name: 'Class 7', level: 7 },
+                { name: 'Class 8', level: 8 },
+                { name: 'Class 9', level: 9 },
+                { name: 'Class 10', level: 10 }
+              ]"
+              :key="preset.name"
+              type="button"
+              class="preset-btn"
+              @click="applyEditClassPreset(preset.name, preset.level)"
+            >
+              {{ preset.name }}
+            </button>
+          </div>
+        </FormField>
+
+        <FormField id="edit_class_numeric_level" label="Numeric Level Rank" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-sort-numeric-up field-icon text-indigo-600"></i>
+            <input
+              id="edit_class_numeric_level"
+              v-model.number="editClassForm.numeric_level"
+              type="number"
+              min="0"
+              max="12"
+              class="clean-input font-mono font-semibold"
+              required
+            />
+          </div>
+        </FormField>
+
+        <!-- Status Toggle -->
+        <div class="pt-1">
+          <label class="toggle-card">
+            <div class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                v-model="editClassForm.is_active"
+                class="custom-toggle-checkbox"
+              />
+              <div class="flex flex-col gap-0.5">
+                <span class="toggle-card-title flex items-center gap-1.5">
+                  <i class="pi pi-check-circle text-sm text-emerald-600"></i>
+                  Active Institutional Grade Level
+                </span>
+                <span class="toggle-card-desc">
+                  Inactive classes are hidden from current enrollment and admission workflows.
+                </span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Clean Modal Action Footer with Delete Option -->
+        <div class="flex items-center justify-between gap-2.5 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg transition-colors flex items-center gap-1.5"
+            @click="handleDeleteClass()"
+          >
+            <i class="pi pi-trash"></i>
+            <span>Delete Class</span>
+          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="modal-btn-cancel"
+              @click="editClassDialogVisible = false"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="editClassSubmitting"
+              class="modal-btn-primary"
+            >
+              <i v-if="editClassSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+              <i v-else class="pi pi-check text-xs"></i>
+              <span>{{ editClassSubmitting ? 'Saving Changes...' : 'Save Changes' }}</span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </Dialog>
   </div>
 </template>
 
@@ -3499,5 +4149,49 @@ onMounted(() => {
   background: #ecfdf5;
   border-color: #a7f3d0;
   transform: translateY(-1px);
+}
+
+.empty-classes-card {
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.5) 0%, rgba(255, 255, 255, 0.8) 100%);
+  border: 1.5px dashed rgba(16, 185, 129, 0.35);
+  margin: 1.5rem 0;
+}
+
+.empty-classes-icon {
+  width: 4rem;
+  height: 4rem;
+  margin: 0 auto 1.25rem;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  color: #059669;
+}
+
+.empty-classes-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 0.5rem;
+}
+
+.empty-classes-desc {
+  font-size: 0.875rem;
+  color: #64748b;
+  max-width: 520px;
+  margin: 0 auto 1.25rem;
+  line-height: 1.5;
+}
+
+.empty-classes-presets {
+  padding-top: 1rem;
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
+  max-width: 600px;
+  margin: 1.5rem auto 0;
 }
 </style>
