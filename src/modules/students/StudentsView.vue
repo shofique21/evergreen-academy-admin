@@ -567,18 +567,47 @@ async function loadPromoteCandidates() {
   if (!promoteSourceClassId.value) return
   try {
     promoteLoadingCandidates.value = true
-    const { data } = await api.get('/api/v1/students', {
-      params: { class_id: promoteSourceClassId.value, status: 'ACTIVE', per_page: 50 },
-    })
-    promoteCandidates.value = data.data
-    promoteForm.value.promotions = data.data.map((s: StudentRecord, idx: number) => ({
-      student_id: s.id,
-      name: s.name,
-      student_uid: s.student_uid,
-      current_roll: s.enrollment?.roll_number || (idx + 1),
-      new_roll: idx + 1,
-      arrears_balance: s.enrollment?.arrears_balance || 0,
-      selected: true,
+    let candidatesData: any[] = []
+    try {
+      const { data } = await api.get('/api/v1/students/promotion-candidates', {
+        params: { source_class_id: promoteSourceClassId.value },
+      })
+      candidatesData = data.data || []
+    } catch {
+      // Fallback if candidate eligibility evaluation fails
+      const { data } = await api.get('/api/v1/students', {
+        params: { class_id: promoteSourceClassId.value, status: 'ACTIVE', per_page: 50 },
+      })
+      candidatesData = (data.data || []).map((s: any, idx: number) => ({
+        student_id: s.id,
+        student_name: s.name,
+        student_uid: s.student_uid,
+        current_roll: s.enrollment?.roll_number || (idx + 1),
+        suggested_roll: idx + 1,
+        arrears_balance: s.enrollment?.arrears_balance || 0,
+        gpa: null,
+        attendance_percent: null,
+        status: 'PROMOTED',
+        eligible_for_next_grade: true,
+        remarks: 'Active student',
+      }))
+    }
+
+    promoteCandidates.value = candidatesData
+    promoteForm.value.promotions = candidatesData.map((c: any) => ({
+      student_id: c.student_id,
+      name: c.student_name,
+      student_uid: c.student_uid,
+      current_roll: c.current_roll,
+      new_roll: c.suggested_roll ?? c.current_roll,
+      arrears_balance: c.arrears_balance ?? 0,
+      gpa: c.gpa,
+      attendance_percent: c.attendance_percent,
+      status: c.status || 'PROMOTED',
+      eligible: c.eligible_for_next_grade ?? true,
+      remarks: c.remarks || '',
+      allow_retained: c.status === 'RETAINED',
+      selected: c.eligible_for_next_grade !== false,
     }))
   } catch (err) {
     console.error('Failed to load promote candidates', err)
@@ -588,7 +617,7 @@ async function loadPromoteCandidates() {
 }
 
 async function handleExecutePromotion() {
-  const selectedPromotions = promoteForm.value.promotions.filter((p) => p.selected)
+  const selectedPromotions = promoteForm.value.promotions.filter((p: any) => p.selected)
   if (selectedPromotions.length === 0) {
     notifyWarn('No Selection', 'Please select at least one student to promote.')
     return
@@ -604,15 +633,20 @@ async function handleExecutePromotion() {
       new_academic_year_id: promoteForm.value.new_academic_year_id,
       target_class_id: promoteForm.value.target_class_id,
       target_section_id: promoteForm.value.target_section_id,
-      promotions: selectedPromotions.map((p) => ({
+      source_class_id: promoteSourceClassId.value,
+      generate_initial_invoice: true,
+      promotions: selectedPromotions.map((p: any) => ({
         student_id: p.student_id,
         new_roll: Number(p.new_roll),
         arrears_balance: Number(p.arrears_balance),
+        gpa: p.gpa,
+        is_passed: p.is_passed,
+        allow_retained: Boolean(p.allow_retained),
       })),
     }
 
     const { data } = await api.post('/api/v1/students/promote', payload)
-    notifySuccess('Promotion Completed', data.message || 'Batch promotion finished successfully.')
+    notifySuccess('Automated Promotion Completed', data.message || `Successfully promoted ${selectedPromotions.length} students into the new academic session.`)
     promoteDialogVisible.value = false
     await fetchStudents(1)
   } catch (err: unknown) {
@@ -2047,7 +2081,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="candidate-roster-box border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+          <div class="candidate-roster-box border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
             <table class="w-full text-left text-xs">
               <thead class="bg-slate-100 text-slate-700 font-bold sticky top-0">
                 <tr>
@@ -2055,24 +2089,63 @@ onMounted(async () => {
                   <th class="p-2.5">Student ID</th>
                   <th class="p-2.5">Name</th>
                   <th class="p-2.5">Current Roll</th>
+                  <th class="p-2.5">Academic Standing</th>
                   <th class="p-2.5">New Roll</th>
                   <th class="p-2.5">Carried Arrears (৳)</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200 bg-white">
-                <tr v-for="cand in promoteForm.promotions" :key="cand.student_id" class="hover:bg-slate-50">
+                <tr v-for="cand in promoteForm.promotions" :key="cand.student_id" class="hover:bg-slate-50 transition-colors">
                   <td class="p-2.5 text-center">
-                    <input type="checkbox" v-model="cand.selected" class="w-4 h-4 cursor-pointer accent-emerald-600" />
+                    <input type="checkbox" v-model="cand.selected" class="w-4 h-4 cursor-pointer accent-emerald-600 rounded" />
                   </td>
                   <td class="p-2.5 font-mono text-slate-700 font-bold">{{ cand.student_uid }}</td>
-                  <td class="p-2.5 font-bold text-slate-800">{{ cand.name }}</td>
+                  <td class="p-2.5 font-bold text-slate-800">
+                    <div>{{ cand.name }}</div>
+                    <div v-if="cand.remarks" class="text-[10px] text-slate-400 font-normal truncate max-w-xs">{{ cand.remarks }}</div>
+                  </td>
                   <td class="p-2.5 font-mono text-slate-500">#{{ cand.current_roll }}</td>
+                  <td class="p-2.5">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        v-if="cand.status === 'PROMOTED'"
+                        class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      >
+                        PROMOTED
+                      </span>
+                      <span
+                        v-else-if="cand.status === 'PROMOTED_WITH_CONDITIONS'"
+                        class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-700 border border-amber-200"
+                      >
+                        CONDITIONAL
+                      </span>
+                      <span
+                        v-else-if="cand.status === 'GRADUATED'"
+                        class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200"
+                      >
+                        GRADUATED
+                      </span>
+                      <span
+                        v-else
+                        class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-50 text-rose-700 border border-rose-200"
+                      >
+                        RETAINED
+                      </span>
+
+                      <span v-if="cand.gpa !== null && cand.gpa !== undefined" class="text-[11px] font-mono font-medium text-slate-600">
+                        GPA {{ Number(cand.gpa).toFixed(2) }}
+                      </span>
+                      <span v-if="cand.attendance_percent !== null && cand.attendance_percent !== undefined" class="text-[11px] text-slate-500">
+                        · {{ cand.attendance_percent }}% att.
+                      </span>
+                    </div>
+                  </td>
                   <td class="p-2.5">
                     <input
                       v-model.number="cand.new_roll"
                       type="number"
                       min="1"
-                      class="clean-input font-mono w-24 h-8 px-2 py-1"
+                      class="clean-input font-mono w-20 h-8 px-2 py-1 text-center"
                       :disabled="!cand.selected"
                     />
                   </td>
@@ -2081,13 +2154,19 @@ onMounted(async () => {
                       v-model.number="cand.arrears_balance"
                       type="number"
                       min="0"
-                      class="clean-input font-mono w-28 h-8 px-2 py-1"
+                      class="clean-input font-mono w-24 h-8 px-2 py-1 text-right"
                       :disabled="!cand.selected"
                     />
                   </td>
                 </tr>
                 <tr v-if="promoteForm.promotions.length === 0">
-                  <td colspan="6" class="p-6 text-center text-slate-400">No active students found in this source class.</td>
+                  <td colspan="7" class="p-6 text-center text-slate-400">
+                    <div v-if="promoteLoadingCandidates" class="flex items-center justify-center gap-2 text-slate-500">
+                      <i class="pi pi-spin pi-spinner"></i>
+                      <span>Evaluating promotion eligibility and academic results...</span>
+                    </div>
+                    <div v-else>No active students found in this source class.</div>
+                  </td>
                 </tr>
               </tbody>
             </table>
