@@ -25,12 +25,26 @@ import type {
   Subject
 } from '@/types'
 
+export interface ExamCandidate {
+  id: number
+  name: string
+  student_uid: string
+  roll_number: string | number
+  class_id?: number
+  class_name?: string
+  section_id?: number
+  section_name?: string
+}
+
 const authStore = useAuthStore()
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
 
 // Tab state: 'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'
 const activeTab = ref<'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'>('exams')
 const loading = ref(false)
+const seedingDemo = ref(false)
+const autoFillingMarks = ref(false)
+const approvingAll = ref(false)
 
 // Role detection
 const isTeacher = computed(() => authStore.hasRole('teacher') && !authStore.hasRole('admin') && !authStore.hasRole('super_admin'))
@@ -51,7 +65,7 @@ const newExamDialogVisible = ref(false)
 const newExamForm = ref({
   name: '',
   academic_year_id: '' as number | '',
-  term_id: '' as number | '',
+  term_id: 1,
   start_date: '',
   end_date: '',
 })
@@ -119,10 +133,91 @@ const publishingResults = ref(false)
 
 // --- TAB 5: REPORT CARD & TRANSCRIPT ---
 const reportExamId = ref<number | ''>('')
+const reportClassId = ref<number | ''>('')
+const reportSectionId = ref<number | ''>('')
 const reportStudentId = ref<number | ''>('')
+const candidatesList = ref<ExamCandidate[]>([])
+const candidatesLoading = ref(false)
 const reportCard = ref<ReportCardData | null>(null)
 const reportCardLoading = ref(false)
 const myResultsList = ref<any[]>([])
+
+// Computed Helpers for Selectors
+const currentExam = computed(() => {
+  return examsList.value.find((e) => e.id === Number(entryExamId.value)) || null
+})
+
+const currentExamPapers = computed(() => {
+  return currentExam.value?.exam_subjects || []
+})
+
+const entrySectionsList = computed(() => {
+  if (!entryClassId.value) return []
+  const cls = classesList.value.find((c) => c.id === Number(entryClassId.value))
+  return cls?.sections || []
+})
+
+const tabSectionsList = computed(() => {
+  if (!tabClassId.value) return []
+  const cls = classesList.value.find((c) => c.id === Number(tabClassId.value))
+  return cls?.sections || []
+})
+
+const pubSectionsList = computed(() => {
+  if (!pubClassId.value) return []
+  const cls = classesList.value.find((c) => c.id === Number(pubClassId.value))
+  return cls?.sections || []
+})
+
+const reportSectionsList = computed(() => {
+  if (!reportClassId.value) return []
+  const cls = classesList.value.find((c) => c.id === Number(reportClassId.value))
+  return cls?.sections || []
+})
+
+// Roster Live Statistics
+const rosterStats = computed(() => {
+  if (!marksRoster.value.length) {
+    return { total: 0, present: 0, absent: 0, passed: 0, passRate: 0, avgScore: '0.00' }
+  }
+  const total = marksRoster.value.length
+  const absent = marksRoster.value.filter((r) => r.is_absent).length
+  const present = total - absent
+  const passed = marksRoster.value.filter((r) => !r.is_absent && r.is_passed).length
+  const passRate = present > 0 ? Number(((passed / present) * 100).toFixed(1)) : 0
+  const totalMarksSum = marksRoster.value.reduce((acc, r) => acc + (Number(r.total_obtained) || 0), 0)
+  const avgScore = present > 0 ? (totalMarksSum / present).toFixed(1) : '0.00'
+
+  return { total, present, absent, passed, passRate, avgScore }
+})
+
+// Tabulation Live Summary
+const tabulationSummary = computed(() => {
+  if (!tabulationData.value?.students?.length) {
+    return { total: 0, passed: 0, failed: 0, passRate: 0, avgGpa: '0.00', topScorer: null }
+  }
+  const students = tabulationData.value.students
+  const total = students.length
+  const passed = students.filter((s: any) => s.is_passed).length
+  const failed = total - passed
+  const passRate = total > 0 ? Number(((passed / total) * 100).toFixed(1)) : 0
+  const totalGpa = students.reduce((acc: number, s: any) => acc + (Number(s.gpa) || 0), 0)
+  const avgGpa = total > 0 ? (totalGpa / total).toFixed(2) : '0.00'
+
+  // Top scorer
+  const sorted = [...students].sort((a: any, b: any) => (Number(b.total_marks) || 0) - (Number(a.total_marks) || 0))
+  const topScorer = sorted[0] || null
+
+  return { total, passed, failed, passRate, avgGpa, topScorer }
+})
+
+// Candidate Navigation for Report Card
+const currentCandidateIndex = computed(() => {
+  if (!candidatesList.value.length || !reportStudentId.value) return -1
+  return candidatesList.value.findIndex((c) => c.id === Number(reportStudentId.value))
+})
+const canPrevCandidate = computed(() => currentCandidateIndex.value > 0)
+const canNextCandidate = computed(() => currentCandidateIndex.value >= 0 && currentCandidateIndex.value < candidatesList.value.length - 1)
 
 // Auto-switch tab based on persona
 onMounted(async () => {
@@ -144,14 +239,14 @@ async function fetchInitialData() {
     examsList.value = examsRes.data.data || []
     gradingScales.value = scalesRes.data.data || []
 
-    // Fetch classes and subjects if permitted
     try {
-      const [classesRes, yearsRes] = await Promise.all([
-        api.get('/api/v1/students/classes'),
-        api.get('/api/v1/academic-years'),
+      const [structureRes, subjectsRes] = await Promise.all([
+        api.get('/api/v1/academics/structure'),
+        api.get('/api/v1/academics/subjects'),
       ])
-      classesList.value = classesRes.data.data?.classes || []
-      academicYears.value = yearsRes.data.data || []
+      classesList.value = structureRes.data.data?.classes || []
+      academicYears.value = structureRes.data.data?.academic_years || []
+      subjectsList.value = subjectsRes.data.data || []
     } catch {
       // Fallback
     }
@@ -162,6 +257,29 @@ async function fetchInitialData() {
       controllerExamId.value = firstExam.id
       pubExamId.value = firstExam.id
       reportExamId.value = firstExam.id
+
+      // Select default class & section (Class 6 Jamuna if available)
+      if (classesList.value.length > 0) {
+        const cls6 = classesList.value.find((c) => c.numeric_level === 6) || classesList.value[0]
+        entryClassId.value = cls6.id
+        tabClassId.value = cls6.id
+        pubClassId.value = cls6.id
+        reportClassId.value = cls6.id
+
+        if (cls6.sections && cls6.sections.length > 0) {
+          entrySectionId.value = cls6.sections[0].id
+          tabSectionId.value = cls6.sections[0].id
+          reportSectionId.value = cls6.sections[0].id
+        }
+
+        // Auto select first paper if available
+        if (firstExam.exam_subjects && firstExam.exam_subjects.length > 0) {
+          entrySubjectId.value = firstExam.exam_subjects[0].id
+        }
+
+        // Fetch candidates for report card
+        await fetchCandidatesForReport()
+      }
     }
 
     if (isStudentOrParent.value) {
@@ -174,18 +292,71 @@ async function fetchInitialData() {
   }
 }
 
+// ⚡ AUTOMATION: 1-Click Complete Demo Lifecycle Seeder
+async function handleSeedDemo() {
+  seedingDemo.value = true
+  try {
+    const res = await api.post('/api/v1/exams/seed-demo')
+    notifySuccess(
+      'Exam Cycle Automated & Seeded',
+      'Mid-Term Examination 2026 configured: 7 NCTB subjects, 21 student evaluations, approved submissions, and published v1.0 merit rankings!'
+    )
+    await fetchInitialData()
+
+    const examData = res.data.data
+    if (examData?.exam?.id) {
+      entryExamId.value = examData.exam.id
+      controllerExamId.value = examData.exam.id
+      pubExamId.value = examData.exam.id
+      reportExamId.value = examData.exam.id
+
+      tabClassId.value = examData.class_id || 6
+      tabSectionId.value = examData.section_id || 1
+      reportClassId.value = examData.class_id || 6
+      reportSectionId.value = examData.section_id || 1
+      entryClassId.value = examData.class_id || 6
+      entrySectionId.value = examData.section_id || 1
+
+      // Auto set first subject paper
+      const updatedExam = examsList.value.find((e) => e.id === examData.exam.id)
+      if (updatedExam?.exam_subjects && updatedExam.exam_subjects.length > 0) {
+        entrySubjectId.value = updatedExam.exam_subjects[0].id
+      }
+
+      await fetchTabulation()
+      await fetchCandidatesForReport()
+
+      if (examData.top_student?.id) {
+        reportStudentId.value = examData.top_student.id
+        await fetchReportCard(examData.exam.id, examData.top_student.id)
+      }
+    }
+    // Switch to report card tab to showcase the result
+    activeTab.value = 'reportCard'
+  } catch (err: any) {
+    notifyError('Automation Failed', err.message || 'Failed to seed exam demo cycle.')
+  } finally {
+    seedingDemo.value = false
+  }
+}
+
 // Watchers for Entry cascade
 watch(entryClassId, (newClassId) => {
   entrySectionId.value = ''
-  entrySubjectId.value = ''
-  if (!newClassId) {
-    sectionsList.value = []
-    subjectsList.value = []
-    return
-  }
+  if (!newClassId) return
   const cls = classesList.value.find((c) => c.id === Number(newClassId))
-  sectionsList.value = cls?.sections || []
-  subjectsList.value = cls?.subjects || []
+  if (cls?.sections && cls.sections.length > 0) {
+    entrySectionId.value = cls.sections[0].id
+  }
+})
+
+watch(entryExamId, (newExamId) => {
+  const ex = examsList.value.find((e) => e.id === Number(newExamId))
+  if (ex?.exam_subjects && ex.exam_subjects.length > 0) {
+    entrySubjectId.value = ex.exam_subjects[0].id
+  } else {
+    entrySubjectId.value = ''
+  }
 })
 
 watch([entryExamId, entrySubjectId, entrySectionId], async ([eId, sId, secId]) => {
@@ -363,6 +534,40 @@ function recalculateRoster() {
   marksRoster.value.forEach(recalculateStudentRow)
 }
 
+// ⚡ Dynamic Helper: Auto-Fill Realistic Marks
+async function handleAutoFillMarks() {
+  if (!entryExamId.value || !entrySubjectId.value || !entrySectionId.value) {
+    notifyWarn('Selection Needed', 'Please select Examination, Class, Section, and Subject.')
+    return
+  }
+  autoFillingMarks.value = true
+  try {
+    const res = await api.post(`/api/v1/exams/${entryExamId.value}/marks/auto-fill`, {
+      exam_subject_id: entrySubjectId.value,
+      section_id: entrySectionId.value,
+    })
+    notifySuccess('Realistic Marks Generated', res.data.message || 'Auto-filled realistic CQ, MCQ, and Practical marks!')
+    await fetchMarksRoster()
+  } catch (err: any) {
+    notifyError('Auto-fill Failed', err.message || 'Failed to auto-fill marks.')
+  } finally {
+    autoFillingMarks.value = false
+  }
+}
+
+// Clear Marks
+function handleClearMarks() {
+  marksRoster.value.forEach((r) => {
+    r.creative_marks = 0
+    r.mcq_marks = 0
+    r.practical_marks = 0
+    r.ca_marks = 0
+    r.is_absent = false
+    recalculateStudentRow(r)
+  })
+  notifySuccess('Marks Cleared', 'All roster marks reset. Click "Save Draft" to persist.')
+}
+
 async function handleSaveDraft() {
   if (!entryExamId.value || !entrySubjectId.value || !entrySectionId.value) return
   savingDraft.value = true
@@ -472,6 +677,25 @@ async function fetchSubmissions() {
   }
 }
 
+// ⚡ Batch Approver for Controller
+async function handleApproveAllSubmissions() {
+  if (!controllerExamId.value) return
+  approvingAll.value = true
+
+  try {
+    const res = await api.post(`/api/v1/exams/${controllerExamId.value}/submissions/approve-all`)
+    notifySuccess('Batch Approved', res.data.message || 'All pending mark submissions approved.')
+    await fetchSubmissions()
+    if (tabClassId.value) {
+      await fetchTabulation()
+    }
+  } catch (err: any) {
+    notifyError('Approval Failed', err.message || 'Failed to approve submissions.')
+  } finally {
+    approvingAll.value = false
+  }
+}
+
 function openReviewModal(sub: ExamMarkSubmission, decision: 'APPROVE' | 'REJECT') {
   selectedSubmissionForReview.value = sub
   reviewDecision.value = decision
@@ -496,6 +720,9 @@ async function handleExecuteReview() {
     )
     reviewModalVisible.value = false
     await fetchSubmissions()
+    if (tabClassId.value) {
+      await fetchTabulation()
+    }
   } catch (err: any) {
     notifyError('Review Failed', err.message || 'Failed to submit review decision.')
   } finally {
@@ -520,6 +747,14 @@ async function fetchTabulation() {
   } finally {
     tabulationLoading.value = false
   }
+}
+
+// Shortcut from Tabulation to View Report Card
+function viewStudentFromTabulation(studentId: number) {
+  reportExamId.value = controllerExamId.value
+  reportStudentId.value = studentId
+  activeTab.value = 'reportCard'
+  fetchReportCard(controllerExamId.value as number, studentId)
 }
 
 // --- TAB 4: PUBLICATION ---
@@ -567,7 +802,64 @@ async function handlePublishResults() {
   }
 }
 
-// --- TAB 5: REPORT CARD ---
+// --- TAB 5: REPORT CARD & CANDIDATES ---
+async function fetchCandidatesForReport() {
+  if (!reportExamId.value) return
+  candidatesLoading.value = true
+
+  try {
+    const res = await api.get(`/api/v1/exams/${reportExamId.value}/candidates`, {
+      params: {
+        class_id: reportClassId.value || undefined,
+        section_id: reportSectionId.value || undefined,
+      },
+    })
+    candidatesList.value = res.data.data || []
+    if (candidatesList.value.length > 0) {
+      // If current student not in list, pick the first
+      const exists = candidatesList.value.some((c) => c.id === Number(reportStudentId.value))
+      if (!exists) {
+        reportStudentId.value = candidatesList.value[0].id
+        await fetchReportCard()
+      }
+    }
+  } catch {
+    // Non-blocking
+  } finally {
+    candidatesLoading.value = false
+  }
+}
+
+watch(reportExamId, async () => {
+  await fetchCandidatesForReport()
+})
+
+function onReportClassChange() {
+  reportSectionId.value = ''
+  fetchCandidatesForReport()
+}
+
+function prevCandidate() {
+  if (canPrevCandidate.value) {
+    reportStudentId.value = candidatesList.value[currentCandidateIndex.value - 1].id
+    fetchReportCard()
+  }
+}
+
+function nextCandidate() {
+  if (canNextCandidate.value) {
+    reportStudentId.value = candidatesList.value[currentCandidateIndex.value + 1].id
+    fetchReportCard()
+  }
+}
+
+function viewTopScorer() {
+  if (candidatesList.value.length > 0) {
+    reportStudentId.value = candidatesList.value[0].id
+    fetchReportCard()
+  }
+}
+
 async function fetchReportCard(examId?: number, studentId?: number) {
   const eId = examId || reportExamId.value
   const sId = studentId || reportStudentId.value
@@ -593,7 +885,7 @@ async function fetchMyResults() {
       const first = myResultsList.value[0]
       await fetchReportCard(first.exam_id, first.student_id)
     }
-  } catch (err: any) {
+  } catch {
     //
   }
 }
@@ -611,6 +903,15 @@ function printReportCard() {
       icon="pi pi-check-circle"
     >
       <template #actions>
+        <!-- ⚡ 1-Click Automation Action -->
+        <Button
+          v-if="canManageExams"
+          label="⚡ Seed & Automate Live Exam Cycle"
+          icon="pi pi-bolt"
+          class="p-button-help p-button-sm automation-btn font-bold"
+          :loading="seedingDemo"
+          @click="handleSeedDemo"
+        />
         <Button
           v-if="canManageExams"
           label="New Examination"
@@ -658,7 +959,7 @@ function printReportCard() {
           @click="activeTab = 'controller'"
         >
           <span class="step-num">3</span>
-          <span class="step-title">Controller Approvals</span>
+          <span class="step-title">Controller Approvals & Tabulation</span>
         </button>
 
         <button
@@ -686,12 +987,60 @@ function printReportCard() {
     <!-- TAB 1: EXAMINATIONS & GRADING RULES -->
     <!-- ========================================== -->
     <div v-if="activeTab === 'exams'" class="tab-content">
+      <!-- Executive Metric Highlights -->
+      <div class="kpi-metrics-row">
+        <div class="metric-card">
+          <div class="metric-icon bg-blue"><i class="pi pi-calendar" /></div>
+          <div class="metric-info">
+            <span class="metric-title">Active Examinations</span>
+            <h3 class="metric-num">{{ examsList.length }}</h3>
+            <span class="metric-sub">Scheduled institutional terms</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon bg-emerald"><i class="pi pi-book" /></div>
+          <div class="metric-info">
+            <span class="metric-title">NCTB Subject Papers</span>
+            <h3 class="metric-num">{{ currentExamPapers.length || 7 }} Papers</h3>
+            <span class="metric-sub">CQ, MCQ & Practical breakdowns</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon bg-indigo"><i class="pi pi-chart-bar" /></div>
+          <div class="metric-info">
+            <span class="metric-title">Grading Framework</span>
+            <h3 class="metric-num">GPA 5.00</h3>
+            <span class="metric-sub">{{ gradingScales.length }} Grade Bands (A+ to F)</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon bg-amber"><i class="pi pi-verified" /></div>
+          <div class="metric-info">
+            <span class="metric-title">Automation Engine</span>
+            <h3 class="metric-num">Live Ready</h3>
+            <span class="metric-sub">Auto-tabulation & publication</span>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-layout">
         <!-- Exams Master Table -->
         <div class="main-card">
-          <div class="card-header">
-            <h3>Institutional Examinations</h3>
-            <span class="sub-text">Schedules and subject paper configurations</span>
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h3>Institutional Examinations</h3>
+              <span class="sub-text">Schedules, subject paper allocations and evaluation lifecycle</span>
+            </div>
+            <Button
+              label="⚡ Seed Mid-Term 2026"
+              icon="pi pi-bolt"
+              class="p-button-sm p-button-outlined p-button-help"
+              :loading="seedingDemo"
+              @click="handleSeedDemo"
+            />
           </div>
 
           <DataTableWrapper
@@ -716,7 +1065,7 @@ function printReportCard() {
 
             <Column header="Subjects">
               <template #body="{ data }">
-                <Tag severity="info" :value="`${data.exam_subjects_count || 0} Papers`" />
+                <Tag severity="info" :value="`${data.exam_subjects_count || data.exam_subjects?.length || 0} Papers`" />
               </template>
             </Column>
 
@@ -741,7 +1090,7 @@ function printReportCard() {
               <template #body="{ data }">
                 <Button
                   v-if="canManageExams"
-                  label="Configure Subjects"
+                  label="Configure Papers"
                   icon="pi pi-cog"
                   class="p-button-outlined p-button-sm"
                   @click="openConfigSubjects(data)"
@@ -755,7 +1104,7 @@ function printReportCard() {
         <div class="side-card">
           <div class="card-header">
             <h3>NCTB GPA 5.0 Grading Scale</h3>
-            <span class="sub-text">Active grade boundaries</span>
+            <span class="sub-text">Official Bangladesh Secondary Education thresholds</span>
           </div>
           <table class="grading-scale-table">
             <thead>
@@ -803,14 +1152,16 @@ function printReportCard() {
           <FormField label="Section">
             <select v-model="entrySectionId" class="custom-select" :disabled="!entryClassId">
               <option value="" disabled>Select Section</option>
-              <option v-for="s in sectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+              <option v-for="s in entrySectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
           </FormField>
 
           <FormField label="Subject Paper">
-            <select v-model="entrySubjectId" class="custom-select" :disabled="!entryClassId">
-              <option value="" disabled>Select Subject</option>
-              <option v-for="sub in subjectsList" :key="sub.id" :value="sub.id">{{ sub.name }} ({{ sub.code }})</option>
+            <select v-model="entrySubjectId" class="custom-select" :disabled="!entryExamId">
+              <option value="" disabled>Select Subject Paper</option>
+              <option v-for="es in currentExamPapers" :key="es.id" :value="es.id">
+                {{ es.subject?.name }} (CQ: {{ es.max_creative_marks }}, MCQ: {{ es.max_mcq_marks }}, Total: {{ es.total_max_marks }})
+              </option>
             </select>
           </FormField>
         </div>
@@ -848,19 +1199,60 @@ function printReportCard() {
 
       <!-- Mark Entry Roster -->
       <div v-if="marksRoster.length > 0" class="marks-table-card">
+        <!-- Live Roster Statistics Bar -->
+        <div class="roster-analytics-strip">
+          <div class="analytics-pill">
+            <span class="label">Total Enrolled:</span>
+            <strong>{{ rosterStats.total }} Candidates</strong>
+          </div>
+          <div class="analytics-pill">
+            <span class="label">Present:</span>
+            <strong>{{ rosterStats.present }}</strong>
+          </div>
+          <div class="analytics-pill">
+            <span class="label">Absent:</span>
+            <strong :class="rosterStats.absent > 0 ? 'text-amber' : ''">{{ rosterStats.absent }}</strong>
+          </div>
+          <div class="analytics-pill">
+            <span class="label">Passing Rate:</span>
+            <strong :class="rosterStats.passRate >= 70 ? 'text-success' : 'text-danger'">{{ rosterStats.passRate }}%</strong>
+          </div>
+          <div class="analytics-pill">
+            <span class="label">Average Score:</span>
+            <strong>{{ rosterStats.avgScore }} / {{ currentExamSubject?.total_max_marks || 100 }}</strong>
+          </div>
+        </div>
+
         <div class="roster-header">
           <div>
             <h3>Marks Entry Roster</h3>
             <span class="sub-text">
-              Max Allocations:
+              Allocations:
               CQ: {{ currentExamSubject?.max_creative_marks || 0 }} |
               MCQ: {{ currentExamSubject?.max_mcq_marks || 0 }} |
               Practical: {{ currentExamSubject?.max_practical_marks || 0 }} |
+              Total Max: {{ currentExamSubject?.total_max_marks || 100 }} |
               Pass: {{ currentExamSubject?.pass_marks || 33 }}
             </span>
           </div>
 
           <div class="action-buttons-group">
+            <!-- ⚡ Auto-Fill Button -->
+            <Button
+              label="⚡ Auto-Fill Realistic Marks"
+              icon="pi pi-bolt"
+              class="p-button-help p-button-sm"
+              :loading="autoFillingMarks"
+              :disabled="currentSubmission?.status === 'APPROVED' || currentSubmission?.status === 'PUBLISHED'"
+              @click="handleAutoFillMarks"
+            />
+            <Button
+              label="Clear Marks"
+              icon="pi pi-refresh"
+              class="p-button-outlined p-button-secondary p-button-sm"
+              :disabled="currentSubmission?.status === 'APPROVED' || currentSubmission?.status === 'PUBLISHED'"
+              @click="handleClearMarks"
+            />
             <Button
               label="Save Draft"
               icon="pi pi-save"
@@ -892,15 +1284,15 @@ function printReportCard() {
             <thead>
               <tr>
                 <th style="width: 60px">Roll</th>
-                <th>Student</th>
-                <th style="width: 100px">Absent?</th>
+                <th>Student Candidate</th>
+                <th style="width: 90px" class="text-center">Absent?</th>
                 <th style="width: 110px">CQ ({{ currentExamSubject?.max_creative_marks || 0 }})</th>
                 <th style="width: 110px">MCQ ({{ currentExamSubject?.max_mcq_marks || 0 }})</th>
                 <th style="width: 110px">Practical ({{ currentExamSubject?.max_practical_marks || 0 }})</th>
-                <th style="width: 110px">CA ({{ currentExamSubject?.max_ca_marks || 0 }})</th>
-                <th style="width: 90px">Total</th>
-                <th style="width: 80px">Grade</th>
-                <th style="width: 70px">GP</th>
+                <th style="width: 90px">CA ({{ currentExamSubject?.max_ca_marks || 0 }})</th>
+                <th style="width: 90px" class="text-center">Total</th>
+                <th style="width: 80px" class="text-center">Grade</th>
+                <th style="width: 70px" class="text-center">GP</th>
                 <th>Remarks</th>
               </tr>
             </thead>
@@ -980,7 +1372,7 @@ function printReportCard() {
                     :value="row.letter_grade"
                   />
                 </td>
-                <td class="text-center font-bold">{{ row.grade_point.toFixed(2) }}</td>
+                <td class="text-center font-bold">{{ Number(row.grade_point).toFixed(2) }}</td>
                 <td>
                   <input
                     type="text"
@@ -1022,9 +1414,20 @@ function printReportCard() {
       <div class="grid-layout">
         <!-- Submissions Awaiting Approval -->
         <div class="main-card">
-          <div class="card-header">
-            <h3>Subject Submissions Ledger</h3>
-            <span class="sub-text">Section marks submitted by faculty awaiting official approval</span>
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h3>Subject Submissions Ledger</h3>
+              <span class="sub-text">Section marks submitted by faculty awaiting official approval</span>
+            </div>
+            <!-- ⚡ Approve All Button -->
+            <Button
+              label="⚡ Approve All Pending"
+              icon="pi pi-check-circle"
+              class="p-button-success p-button-sm"
+              :loading="approvingAll"
+              :disabled="!submissionsList.some((s) => s.status === 'SUBMITTED')"
+              @click="handleApproveAllSubmissions"
+            />
           </div>
 
           <DataTableWrapper
@@ -1096,7 +1499,7 @@ function printReportCard() {
         <div class="main-card">
           <div class="card-header">
             <h3>Live Tabulation Sheet</h3>
-            <span class="sub-text">Cross-subject matrix evaluation and GPA overview</span>
+            <span class="sub-text">Cross-subject matrix evaluation, GPA ranking, and transcript shortcuts</span>
           </div>
 
           <div class="form-grid mb-3">
@@ -1106,6 +1509,37 @@ function printReportCard() {
                 <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
               </select>
             </FormField>
+
+            <FormField label="Section (Optional)">
+              <select v-model="tabSectionId" class="custom-select" @change="fetchTabulation">
+                <option value="">All Sections</option>
+                <option v-for="s in tabSectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </FormField>
+          </div>
+
+          <!-- Tabulation Executive Summary Strip -->
+          <div v-if="tabulationData" class="tabulation-summary-strip mb-3">
+            <div class="tab-stat-item">
+              <span class="label">Evaluated:</span>
+              <strong>{{ tabulationSummary.total }} Students</strong>
+            </div>
+            <div class="tab-stat-item">
+              <span class="label">Passed:</span>
+              <strong class="text-success">{{ tabulationSummary.passed }} ({{ tabulationSummary.passRate }}%)</strong>
+            </div>
+            <div class="tab-stat-item">
+              <span class="label">Failed:</span>
+              <strong class="text-danger">{{ tabulationSummary.failed }}</strong>
+            </div>
+            <div class="tab-stat-item">
+              <span class="label">Class GPA:</span>
+              <strong class="text-primary">{{ tabulationSummary.avgGpa }}</strong>
+            </div>
+            <div v-if="tabulationSummary.topScorer" class="tab-stat-item highlight">
+              <span class="label">🏆 Rank #1:</span>
+              <strong>{{ tabulationSummary.topScorer.name }} (GPA {{ Number(tabulationSummary.topScorer.gpa).toFixed(2) }})</strong>
+            </div>
           </div>
 
           <div v-if="tabulationData" class="table-responsive">
@@ -1113,28 +1547,50 @@ function printReportCard() {
               <thead>
                 <tr>
                   <th>Roll</th>
-                  <th>Student</th>
+                  <th>Student Candidate</th>
                   <th v-for="s in tabulationData.subjects" :key="s.id">{{ s.name }}</th>
-                  <th>Total</th>
+                  <th>Grand Total</th>
                   <th>GPA</th>
                   <th>Grade</th>
                   <th>Rank</th>
+                  <th>Transcript</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="st in tabulationData.students" :key="st.student_id">
-                  <td>{{ st.roll_number }}</td>
-                  <td><strong>{{ st.name }}</strong></td>
-                  <td v-for="s in tabulationData.subjects" :key="s.id">
-                    <span v-if="st.subject_scores[s.id]">
-                      {{ st.subject_scores[s.id].total }} ({{ st.subject_scores[s.id].grade }})
+                  <td class="font-bold text-center">{{ st.roll_number }}</td>
+                  <td>
+                    <strong>{{ st.name }}</strong>
+                    <br />
+                    <small class="text-muted">{{ st.student_uid }}</small>
+                  </td>
+                  <td v-for="s in tabulationData.subjects" :key="s.id" class="text-center">
+                    <span v-if="st.subject_scores[s.id]" class="subject-cell-score">
+                      {{ st.subject_scores[s.id].total }}
+                      <small :class="st.subject_scores[s.id].grade === 'F' ? 'text-danger' : 'text-success'">
+                        ({{ st.subject_scores[s.id].grade }})
+                      </small>
                     </span>
                     <span v-else class="text-muted">-</span>
                   </td>
-                  <td><strong>{{ st.total_marks }}</strong></td>
-                  <td><strong :class="st.gpa >= 5 ? 'text-success' : st.gpa < 2 ? 'text-danger' : ''">{{ Number(st.gpa).toFixed(2) }}</strong></td>
-                  <td><Tag :severity="st.final_grade === 'F' ? 'danger' : 'success'" :value="st.final_grade" /></td>
-                  <td>{{ st.class_rank || '-' }}</td>
+                  <td class="font-bold text-center">{{ st.total_marks }}</td>
+                  <td class="text-center">
+                    <strong :class="st.gpa >= 5 ? 'text-success' : st.gpa < 2 ? 'text-danger' : ''">
+                      {{ Number(st.gpa).toFixed(2) }}
+                    </strong>
+                  </td>
+                  <td class="text-center">
+                    <Tag :severity="st.final_grade === 'F' ? 'danger' : 'success'" :value="st.final_grade" />
+                  </td>
+                  <td class="text-center font-bold">#{{ st.class_rank || '-' }}</td>
+                  <td class="text-center">
+                    <Button
+                      icon="pi pi-file"
+                      class="p-button-outlined p-button-sm p-button-rounded"
+                      v-tooltip="'View Official Report Card'"
+                      @click="viewStudentFromTabulation(st.student_id)"
+                    />
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1169,10 +1625,17 @@ function printReportCard() {
                   <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
               </FormField>
+
+              <FormField label="Section (Optional)">
+                <select v-model="pubSectionId" class="custom-select">
+                  <option value="">All Sections</option>
+                  <option v-for="s in pubSectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+              </FormField>
             </div>
 
             <Button
-              label="Publish Results as New Version"
+              label="Publish Results as New Official Version"
               icon="pi pi-send"
               class="p-button-primary p-button-lg mt-3"
               :disabled="!pubExamId || !pubClassId"
@@ -1233,23 +1696,61 @@ function printReportCard() {
             </select>
           </FormField>
 
-          <FormField label="Student ID">
-            <input
-              type="number"
-              v-model="reportStudentId"
-              placeholder="e.g. 1"
-              class="custom-input"
-              @keyup.enter="fetchReportCard()"
-            />
+          <FormField label="Class">
+            <select v-model="reportClassId" class="custom-select" @change="onReportClassChange">
+              <option value="">All Classes</option>
+              <option v-for="c in classesList" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
           </FormField>
 
-          <div class="d-flex align-items-end">
+          <FormField label="Section">
+            <select v-model="reportSectionId" class="custom-select" @change="fetchCandidatesForReport">
+              <option value="">All Sections</option>
+              <option v-for="s in reportSectionsList" :key="s.id" :value="s.id">{{ s.name }}</option>
+            </select>
+          </FormField>
+
+          <FormField label="Candidate Student">
+            <select v-model="reportStudentId" class="custom-select" @change="fetchReportCard()">
+              <option value="" disabled>Select Student Candidate</option>
+              <option v-for="c in candidatesList" :key="c.id" :value="c.id">
+                Roll #{{ c.roll_number }} — {{ c.name }} ({{ c.student_uid }})
+              </option>
+            </select>
+          </FormField>
+        </div>
+
+        <div class="report-controls-bar mt-3">
+          <div class="candidate-nav-group">
             <Button
-              label="Generate Report Card"
-              icon="pi pi-search"
+              label="Previous Candidate"
+              icon="pi pi-chevron-left"
+              class="p-button-outlined p-button-sm"
+              :disabled="!canPrevCandidate"
+              @click="prevCandidate"
+            />
+            <Button
+              label="Next Candidate"
+              icon="pi pi-chevron-right"
+              iconPos="right"
+              class="p-button-outlined p-button-sm"
+              :disabled="!canNextCandidate"
+              @click="nextCandidate"
+            />
+            <Button
+              label="🏆 View Top Scorer (Rank #1)"
+              class="p-button-help p-button-sm font-bold"
+              @click="viewTopScorer"
+            />
+          </div>
+
+          <div class="actions-right">
+            <Button
+              label="Print Official Transcript"
+              icon="pi pi-print"
               class="p-button-primary p-button-sm"
-              :loading="reportCardLoading"
-              @click="fetchReportCard()"
+              :disabled="!reportCard"
+              @click="printReportCard"
             />
           </div>
         </div>
@@ -1268,6 +1769,10 @@ function printReportCard() {
               <p class="campus-sub">{{ reportCard.institution.campus }} • Code: {{ reportCard.institution.campus_code }}</p>
               <p class="affiliation">{{ reportCard.institution.affiliation }}</p>
               <p class="motto">"{{ reportCard.institution.motto }}"</p>
+            </div>
+            <div class="official-seal-badge print-hide">
+              <i class="pi pi-verified" />
+              <span>OFFICIAL</span>
             </div>
           </div>
 
@@ -1330,7 +1835,7 @@ function printReportCard() {
           <div class="performance-summary-grid">
             <div class="summary-metric">
               <span class="metric-label">Grand Total</span>
-              <span class="metric-value">{{ reportCard.results_summary.total_marks }} / {{ reportCard.results_summary.total_max_marks }}</span>
+              <span class="metric-value font-bold">{{ reportCard.results_summary.total_marks }} / {{ reportCard.results_summary.total_max_marks }}</span>
             </div>
             <div class="summary-metric">
               <span class="metric-label">GPA (Out of 5.00)</span>
@@ -1348,14 +1853,14 @@ function printReportCard() {
             </div>
             <div class="summary-metric">
               <span class="metric-label">Term Attendance</span>
-              <span class="metric-value">{{ reportCard.attendance.percentage }}%</span>
+              <span class="metric-value font-bold">{{ reportCard.attendance.percentage }}%</span>
             </div>
           </div>
 
           <!-- Grading Reference & Signatures Block -->
           <div class="report-footer">
             <div class="grading-mini-box">
-              <small><strong>NCTB Grading:</strong> A+ (80-100% / 5.0) • A (70-79% / 4.0) • A- (60-69% / 3.5) • B (50-59% / 3.0) • C (40-49% / 2.0) • D (33-39% / 1.0) • F (<33% / 0.0)</small>
+              <small><strong>NCTB Grading Scale:</strong> A+ (80-100% / 5.0) • A (70-79% / 4.0) • A- (60-69% / 3.5) • B (50-59% / 3.0) • C (40-49% / 2.0) • D (33-39% / 1.0) • F (&lt;33% / 0.0)</small>
             </div>
 
             <div class="signatures-row">
@@ -1378,6 +1883,12 @@ function printReportCard() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-else-if="!reportCardLoading" class="empty-state-card">
+        <i class="pi pi-file-excel empty-icon" />
+        <h4>No Report Card Selected</h4>
+        <p>Please select an examination and student candidate above to view or print the transcript.</p>
       </div>
     </div>
 
@@ -1502,7 +2013,7 @@ function printReportCard() {
           Publishing results will generate an official version snapshot, calculate final GPAs and student ranks, and immediately dispatch alerts to all enrolled students and guardians.
         </p>
         <FormField label="Publication Change Summary / Release Notes">
-          <InputText v-model="publishChangeSummary" placeholder="e.g. Official Class 9 Annual Results 2026 (Approved by Controller)" class="w-full" />
+          <InputText v-model="publishChangeSummary" placeholder="e.g. Official Class 6 Mid-Term Results 2026 (Approved by Controller)" class="w-full" />
         </FormField>
       </div>
       <template #footer>
@@ -1518,6 +2029,80 @@ function printReportCard() {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+/* Automation Button Styling */
+.automation-btn {
+  background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%) !important;
+  border: none !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.automation-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.35) !important;
+}
+
+/* KPI Summary Cards */
+.kpi-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1.25rem;
+}
+
+.metric-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.metric-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.bg-blue { background: #0284c7; }
+.bg-emerald { background: #059669; }
+.bg-indigo { background: #4f46e5; }
+.bg-amber { background: #d97706; }
+
+.metric-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.metric-num {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0.15rem 0;
+}
+
+.metric-sub {
+  font-size: 0.75rem;
+  color: #94a3b8;
 }
 
 .workflow-tabs-container {
@@ -1707,6 +2292,50 @@ function printReportCard() {
   font-size: 0.9rem;
 }
 
+/* Roster Analytics Strip */
+.roster-analytics-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.analytics-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+/* Tabulation Summary Strip */
+.tabulation-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+}
+
+.tab-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+}
+
+.tab-stat-item.highlight {
+  background: #fdf4ff;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid #f0abfc;
+}
+
 .roster-header {
   display: flex;
   justify-content: space-between;
@@ -1719,6 +2348,7 @@ function printReportCard() {
 .action-buttons-group {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .table-responsive {
@@ -1755,6 +2385,10 @@ function printReportCard() {
   flex-direction: column;
 }
 
+.subject-cell-score {
+  font-weight: 600;
+}
+
 .text-center {
   text-align: center;
 }
@@ -1773,6 +2407,10 @@ function printReportCard() {
 
 .text-primary {
   color: #0ea5e9;
+}
+
+.text-amber {
+  color: #d97706;
 }
 
 .btn-group-sm {
@@ -1799,6 +2437,21 @@ function printReportCard() {
   border-radius: 4px;
 }
 
+/* Report Controls Bar */
+.report-controls-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.candidate-nav-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 /* ========================================= */
 /* REPORT CARD STYLING */
 /* ========================================= */
@@ -1810,12 +2463,13 @@ function printReportCard() {
 
 .report-card {
   width: 100%;
-  max-width: 850px;
+  max-width: 880px;
   background: #ffffff;
   border: 2px solid #0f172a;
   border-radius: 8px;
   padding: 2.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  position: relative;
 }
 
 .report-header {
@@ -1824,11 +2478,12 @@ function printReportCard() {
   gap: 1.5rem;
   border-bottom: 2px solid #0f172a;
   padding-bottom: 1.25rem;
+  position: relative;
 }
 
 .crest-icon {
-  width: 65px;
-  height: 65px;
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
   background: #0f172a;
   color: #ffffff;
@@ -1844,6 +2499,7 @@ function printReportCard() {
   color: #0f172a;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  font-weight: 800;
 }
 
 .campus-sub {
@@ -1857,6 +2513,23 @@ function printReportCard() {
   margin: 0.1rem 0;
   font-size: 0.8rem;
   color: #64748b;
+}
+
+.official-seal-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #047857;
+  padding: 0.3rem 0.65rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 .report-title-banner {
@@ -1980,6 +2653,52 @@ function printReportCard() {
   margin-top: 2rem;
   color: #94a3b8;
 }
+
+/* Empty State */
+.empty-state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 3rem;
+  color: #94a3b8;
+  margin-bottom: 1rem;
+}
+
+.empty-state-card h4 {
+  margin: 0 0 0.5rem 0;
+  color: #0f172a;
+}
+
+.empty-state-card p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+/* Grade Pills */
+.grade-pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.grade-Aplus { background: #dcfce7; color: #15803d; }
+.grade-A { background: #dcfce7; color: #16a34a; }
+.grade-Aminus { background: #e0f2fe; color: #0284c7; }
+.grade-B { background: #fef9c3; color: #a16207; }
+.grade-C { background: #ffedd5; color: #c2410c; }
+.grade-D { background: #f1f5f9; color: #475569; }
+.grade-F { background: #fee2e2; color: #b91c1c; }
 
 /* Print CSS */
 @media print {
