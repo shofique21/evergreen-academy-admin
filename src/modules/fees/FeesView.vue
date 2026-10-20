@@ -35,6 +35,7 @@ const loading = ref(false)
 // Master data
 const academicYears = ref<AcademicYear[]>([])
 const currentSession = ref<AcademicYear | null>(null)
+const selectedSessionId = ref<number>(0)
 const classes = ref<ClassLevel[]>([])
 const feeCategories = ref<FeeCategory[]>([])
 
@@ -166,24 +167,52 @@ function checkUrlPaymentStatus() {
   }
 }
 
+function extractList<T>(res: any): T[] {
+  if (!res) return []
+  if (Array.isArray(res.data?.data)) return res.data.data
+  if (Array.isArray(res.data)) return res.data
+  if (Array.isArray(res)) return res
+  return []
+}
+
 async function fetchMasterData() {
   try {
     const [acadRes, classesRes, catRes] = await Promise.all([
-      api.get<{ data: AcademicYear[] }>('/api/v1/academic-years'),
-      api.get<{ data: ClassLevel[] }>('/api/v1/classes'),
-      api.get<{ data: FeeCategory[] }>('/api/v1/finance/categories'),
+      api.get('/api/v1/academics/years').catch(() => api.get('/api/v1/academic-years')),
+      api.get('/api/v1/academics/classes').catch(() => api.get('/api/v1/classes')),
+      api.get('/api/v1/finance/categories'),
     ])
-    academicYears.value = acadRes.data?.data || []
-    currentSession.value = academicYears.value.find((y) => y.is_current) || academicYears.value[0] || null
-    if (currentSession.value) {
+    academicYears.value = extractList<AcademicYear>(acadRes)
+    classes.value = extractList<ClassLevel>(classesRes)
+    feeCategories.value = extractList<FeeCategory>(catRes)
+
+    if (academicYears.value.length > 0) {
+      currentSession.value = academicYears.value.find((y) => y.is_current) || academicYears.value[0]
+      selectedSessionId.value = currentSession.value.id
       generateForm.value.academic_year_id = currentSession.value.id
       structureForm.value.academic_year_id = currentSession.value.id
       bulkAssignForm.value.academic_year_id = currentSession.value.id
     }
-    classes.value = classesRes.data?.data || []
-    feeCategories.value = catRes.data?.data || []
-  } catch {
-    // Non-blocking
+
+    if (classes.value.length > 0 && !structureForm.value.class_id) {
+      structureForm.value.class_id = classes.value[0].id
+    }
+
+    if (allFeeHeads.value.length > 0 && !structureForm.value.fee_head_id) {
+      structureForm.value.fee_head_id = allFeeHeads.value[0].id
+      bulkAssignForm.value.fee_head_id = allFeeHeads.value[0].id
+    }
+  } catch (err: any) {
+    console.error('Failed to load master data in FeesView:', err)
+  }
+}
+
+function handleSessionChange() {
+  const found = academicYears.value.find((y) => y.id === selectedSessionId.value)
+  if (found) {
+    currentSession.value = found
+    structureForm.value.academic_year_id = found.id
+    fetchStructures()
   }
 }
 
@@ -296,27 +325,46 @@ const structureMatrix = computed<MatrixRow[]>(() => {
 })
 
 function openEditStructureModal(headId?: number, classId?: number) {
-  structureForm.value.academic_year_id = currentSession.value?.id || 1
-  structureForm.value.fee_head_id = headId || allFeeHeads.value[0]?.id || 0
-  structureForm.value.class_id = classId || classes.value[0]?.id || 0
-  
+  if (academicYears.value.length === 0 || classes.value.length === 0 || allFeeHeads.value.length === 0) {
+    fetchMasterData().finally(() => {
+      populateStructureModal(headId, classId)
+      structureModalVisible.value = true
+    })
+  } else {
+    populateStructureModal(headId, classId)
+    structureModalVisible.value = true
+  }
+}
+
+function populateStructureModal(headId?: number, classId?: number) {
+  const targetYearId = currentSession.value?.id || academicYears.value[0]?.id || 1
+  const targetHeadId = headId || allFeeHeads.value[0]?.id || (feeCategories.value[0]?.fee_heads?.[0]?.id ?? 1)
+  const targetClassId = classId || classes.value[0]?.id || 1
+
+  structureForm.value.academic_year_id = targetYearId
+  structureForm.value.fee_head_id = targetHeadId
+  structureForm.value.class_id = targetClassId
+
   // Prefill existing amount if available
   const existing = feeStructures.value.find(
-    (s) => s.fee_head_id === structureForm.value.fee_head_id && s.class_id === structureForm.value.class_id
+    (s) => s.fee_head_id === targetHeadId && s.class_id === targetClassId && (!targetYearId || s.academic_year_id === targetYearId)
   )
   if (existing) {
     structureForm.value.amount = Number(existing.amount)
     structureForm.value.billing_frequency = existing.billing_frequency
-    structureForm.value.due_day_of_month = existing.due_day_of_month
+    structureForm.value.due_day_of_month = existing.due_day_of_month || 10
   } else {
     structureForm.value.amount = 1500
     structureForm.value.billing_frequency = 'MONTHLY'
     structureForm.value.due_day_of_month = 10
   }
-  structureModalVisible.value = true
 }
 
 async function handleSaveStructure() {
+  if (!structureForm.value.academic_year_id || !structureForm.value.class_id || !structureForm.value.fee_head_id) {
+    notifyError('Validation Error', 'Please select academic session, class level, and fee head.')
+    return
+  }
   try {
     await api.post('/api/v1/finance/structures', structureForm.value)
     notifySuccess('Rate Saved', 'Class fee structure rate updated successfully.')
@@ -629,9 +677,10 @@ async function handleRunReconciliation() {
 // Helper: All Fee Heads Flat List
 const allFeeHeads = computed(() => {
   const heads: FeeHead[] = []
-  feeCategories.value.forEach((cat) => {
-    if (cat.fee_heads) {
-      heads.push(...cat.fee_heads)
+  feeCategories.value.forEach((cat: any) => {
+    const list = cat.fee_heads || cat.feeHeads || []
+    if (Array.isArray(list)) {
+      heads.push(...list)
     }
   })
   return heads
@@ -811,6 +860,17 @@ function formatCurrency(amount: number | string | null | undefined): string {
           </p>
         </div>
         <div class="action-wrap">
+          <select
+            v-if="academicYears.length > 0"
+            v-model.number="selectedSessionId"
+            class="select-input font-bold"
+            style="min-width: 170px;"
+            @change="handleSessionChange"
+          >
+            <option v-for="y in academicYears" :key="y.id" :value="y.id">
+              {{ y.name }} {{ y.is_current ? ' ★ (Active)' : '' }}
+            </option>
+          </select>
           <Button
             label="➕ Configure Structure Price"
             icon="pi pi-plus"
@@ -1644,20 +1704,36 @@ function formatCurrency(amount: number | string | null | undefined): string {
     <Dialog v-model:visible="structureModalVisible" header="Configure Class Fee Structure Rate" modal :style="{ width: '520px' }">
       <div class="modal-body-stack">
         <FormField label="Academic Session">
-          <select v-model="structureForm.academic_year_id" class="full-width select-input">
-            <option v-for="y in academicYears" :key="y.id" :value="y.id">{{ y.name }}</option>
+          <select v-model.number="structureForm.academic_year_id" class="full-width select-input font-bold">
+            <option :value="0" disabled>Select Academic Session</option>
+            <option v-for="y in academicYears" :key="y.id" :value="y.id">
+              {{ y.name }} {{ y.is_current ? ' ★ (Current)' : '' }}
+            </option>
           </select>
         </FormField>
 
         <FormField label="Class / Grade Level">
-          <select v-model="structureForm.class_id" class="full-width select-input">
+          <select v-model.number="structureForm.class_id" class="full-width select-input font-bold">
+            <option :value="0" disabled>Select Class / Grade Level</option>
             <option v-for="c in classes" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </FormField>
 
         <FormField label="Fee Particular (Head)">
-          <select v-model="structureForm.fee_head_id" class="full-width select-input">
-            <option v-for="h in allFeeHeads" :key="h.id" :value="h.id">{{ h.name }} ({{ h.code }})</option>
+          <select v-model.number="structureForm.fee_head_id" class="full-width select-input font-bold">
+            <option :value="0" disabled>Select Fee Particular</option>
+            <template v-if="feeCategories.length > 0">
+              <optgroup v-for="cat in feeCategories" :key="cat.id" :label="cat.name">
+                <option v-for="h in (cat.fee_heads || cat.feeHeads || [])" :key="h.id" :value="h.id">
+                  {{ h.name }} ({{ h.code }})
+                </option>
+              </optgroup>
+            </template>
+            <template v-else>
+              <option v-for="h in allFeeHeads" :key="h.id" :value="h.id">
+                {{ h.name }} ({{ h.code }})
+              </option>
+            </template>
           </select>
         </FormField>
 
@@ -1687,6 +1763,41 @@ function formatCurrency(amount: number | string | null | undefined): string {
       </div>
     </Dialog>
 
+    <!-- MODAL: ADD FEE CATEGORY -->
+    <Dialog v-model:visible="categoryModalVisible" header="Add New Fee Category" modal :style="{ width: '450px' }">
+      <div class="modal-body-stack">
+        <FormField label="Category Name">
+          <InputText v-model="categoryForm.name" placeholder="e.g. Laboratory & ICT, Co-Curricular" class="full-width" />
+        </FormField>
+        <div class="modal-footer-row">
+          <Button label="Cancel" severity="secondary" text @click="categoryModalVisible = false" />
+          <Button label="Create Category" icon="pi pi-check" severity="primary" @click="handleCreateCategory" />
+        </div>
+      </div>
+    </Dialog>
+
+    <!-- MODAL: ADD FEE HEAD -->
+    <Dialog v-model:visible="headModalVisible" header="Add New Fee Head Line Item" modal :style="{ width: '480px' }">
+      <div class="modal-body-stack">
+        <FormField label="Fee Category">
+          <select v-model.number="headForm.fee_category_id" class="full-width select-input">
+            <option :value="0" disabled>Select Category</option>
+            <option v-for="cat in feeCategories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+          </select>
+        </FormField>
+        <FormField label="Head / Particular Name">
+          <InputText v-model="headForm.name" placeholder="e.g. Science Lab Consumables" class="full-width" />
+        </FormField>
+        <FormField label="Unique Code">
+          <InputText v-model="headForm.code" placeholder="e.g. LAB_SCIENCE" class="full-width font-mono" />
+        </FormField>
+        <div class="modal-footer-row">
+          <Button label="Cancel" severity="secondary" text @click="headModalVisible = false" />
+          <Button label="Create Fee Head" icon="pi pi-check" severity="primary" @click="handleCreateHead" />
+        </div>
+      </div>
+    </Dialog>
+
     <!-- MODAL: RUN AUTOMATED BILLING BATCH -->
     <Dialog v-model:visible="generateModalVisible" header="Launch Automated Student Billing Batch" modal :style="{ width: '560px' }">
       <div class="modal-body-stack">
@@ -1695,8 +1806,11 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </p>
 
         <FormField label="Academic Session">
-          <select v-model="generateForm.academic_year_id" class="full-width select-input">
-            <option v-for="y in academicYears" :key="y.id" :value="y.id">{{ y.name }}</option>
+          <select v-model.number="generateForm.academic_year_id" class="full-width select-input font-bold">
+            <option :value="0" disabled>Select Academic Session</option>
+            <option v-for="y in academicYears" :key="y.id" :value="y.id">
+              {{ y.name }} {{ y.is_current ? ' ★ (Current)' : '' }}
+            </option>
           </select>
         </FormField>
 
@@ -1758,15 +1872,27 @@ function formatCurrency(amount: number | string | null | undefined): string {
     <Dialog v-model:visible="bulkAssignModalVisible" header="Bulk Assign Fee Plan / Service to Class" modal :style="{ width: '500px' }">
       <div class="modal-body-stack">
         <FormField label="Target Class">
-          <select v-model="bulkAssignForm.class_id" class="full-width select-input">
+          <select v-model="bulkAssignForm.class_id" class="full-width select-input font-bold">
             <option :value="null">All Classes (Whole Session)</option>
             <option v-for="c in classes" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </FormField>
 
         <FormField label="Select Fee Head / Service">
-          <select v-model="bulkAssignForm.fee_head_id" class="full-width select-input">
-            <option v-for="h in allFeeHeads" :key="h.id" :value="h.id">{{ h.name }} ({{ h.code }})</option>
+          <select v-model.number="bulkAssignForm.fee_head_id" class="full-width select-input font-bold">
+            <option :value="0" disabled>Select Fee Head / Service</option>
+            <template v-if="feeCategories.length > 0">
+              <optgroup v-for="cat in feeCategories" :key="cat.id" :label="cat.name">
+                <option v-for="h in (cat.fee_heads || cat.feeHeads || [])" :key="h.id" :value="h.id">
+                  {{ h.name }} ({{ h.code }})
+                </option>
+              </optgroup>
+            </template>
+            <template v-else>
+              <option v-for="h in allFeeHeads" :key="h.id" :value="h.id">
+                {{ h.name }} ({{ h.code }})
+              </option>
+            </template>
           </select>
         </FormField>
 
@@ -2319,15 +2445,32 @@ function formatCurrency(amount: number | string | null | undefined): string {
 .select-input {
   border: 1px solid #cbd5e1;
   border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.75rem;
   background: #ffffff;
-  color: #334155;
-  font-size: 0.75rem;
+  color: #1e293b;
+  font-size: 0.8125rem;
+  font-family: inherit;
   outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .select-input:focus {
   border-color: #059669;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+.select-input optgroup {
+  font-weight: 700;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.select-input option {
+  padding: 0.35rem 0.5rem;
+  font-weight: 400;
+  color: #334155;
+  background: #ffffff;
 }
 
 .full-width {
