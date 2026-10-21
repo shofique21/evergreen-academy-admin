@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatBDT, formatDate } from '@/utils/formatters'
-import { PageHeader, LoadingState, ErrorState } from '@/components/common'
-import { StatusBadge } from '@/components/notifications'
+import { PageHeader, LoadingState, ErrorState, StatusBadge } from '@/components/common'
 import { AppButton } from '@/components/forms'
 
 const router = useRouter()
+const route = useRoute()
 const toast = useToast()
 const authStore = useAuthStore()
 
@@ -32,14 +32,14 @@ interface TimetableSlot {
 }
 
 interface AttendanceSummary {
-  percentage: number
+  percentage: number | null
   total_sessions: number
   present_count: number
   late_count: number
   absent_count: number
   excused_count: number
-  streak_days: number
-  status_label: 'EXCELLENT' | 'REGULAR' | 'CRITICAL'
+  streak_days: number | null
+  status_label: 'EXCELLENT' | 'REGULAR' | 'CRITICAL' | 'NO_DATA'
 }
 
 interface UpcomingExam {
@@ -70,11 +70,16 @@ interface PublishedResult {
   class_rank: number
   section_rank: number
   is_passed: boolean
+  // Sample shape (subject/marks/grade/gpa) or published snapshot shape (subject_name/total_obtained/letter_grade/grade_point)
   marks_breakdown: Array<{
-    subject: string
-    marks: number
-    grade: string
-    gpa: number
+    subject?: string
+    marks?: number
+    grade?: string
+    gpa?: number
+    subject_name?: string
+    total_obtained?: number
+    letter_grade?: string
+    grade_point?: number
   }>
 }
 
@@ -138,28 +143,28 @@ interface NoticeItem {
 interface StudentOverviewData {
   profile: {
     student_id: number | null
-    student_uid: string
+    student_uid: string | null
     first_name: string
     last_name: string
     full_name: string
     email: string
     photo: string | null
-    class_id: number
-    class_name: string
-    section_id: number
-    section_name: string
-    roll_number: string
-    campus_name: string
+    class_id: number | null
+    class_name: string | null
+    section_id: number | null
+    section_name: string | null
+    roll_number: string | null
+    campus_name: string | null
     summary_date: string
     day_of_week: number
     day_name: string
   }
   kpis: {
-    attendance_percentage: number
+    attendance_percentage: number | null
     total_classes_today: number
     upcoming_exams_count: number
-    latest_gpa: number
-    latest_grade: string
+    latest_gpa: number | null
+    latest_grade: string | null
     outstanding_dues: number
     pending_homework_count: number
     unread_notices_count: number
@@ -180,303 +185,53 @@ const dashboardData = ref<StudentOverviewData | null>(null)
 const activeAcademicTab = ref<'exams' | 'results'>('exams')
 const activeFinanceTab = ref<'dues' | 'receipts'>('dues')
 
-// Fallback initial dataset for development & offline resiliency
-const fallbackData: StudentOverviewData = {
+// Empty shell used only while loading / on error, so the header can render. Never sample data.
+const emptyData: StudentOverviewData = {
   profile: {
-    student_id: 1,
-    student_uid: 'STU-2026-0891',
-    first_name: 'Sadman',
-    last_name: 'Sakib',
-    full_name: 'Sadman Sakib',
-    email: 'sakib@evergreen.edu.bd',
+    student_id: null,
+    student_uid: null,
+    first_name: '',
+    last_name: '',
+    full_name: '',
+    email: '',
     photo: null,
-    class_id: 10,
-    class_name: 'Class 10 (Science)',
-    section_id: 1,
-    section_name: 'Section A',
-    roll_number: 'Roll: 05',
-    campus_name: 'Dhanmondi Main Campus',
-    summary_date: '2026-10-16',
-    day_of_week: 6,
-    day_name: 'Friday',
+    class_id: null,
+    class_name: null,
+    section_id: null,
+    section_name: null,
+    roll_number: null,
+    campus_name: null,
+    summary_date: new Date().toISOString().substring(0, 10),
+    day_of_week: new Date().getDay(),
+    day_name: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
   },
   kpis: {
-    attendance_percentage: 96.8,
-    total_classes_today: 5,
-    upcoming_exams_count: 2,
-    latest_gpa: 5.00,
-    latest_grade: 'A+',
-    outstanding_dues: 6000.00,
-    pending_homework_count: 1,
-    unread_notices_count: 3,
+    attendance_percentage: null,
+    total_classes_today: 0,
+    upcoming_exams_count: 0,
+    latest_gpa: null,
+    latest_grade: null,
+    outstanding_dues: 0,
+    pending_homework_count: 0,
+    unread_notices_count: 0,
   },
-  today_timetable: [
-    {
-      id: 1,
-      period_number: 1,
-      period_name: 'Period 1 (08:30 - 09:15)',
-      start_time: '08:30:00',
-      end_time: '09:15:00',
-      time_formatted: '08:30 - 09:15',
-      subject_name: 'Higher Mathematics',
-      subject_code: 'HMATH-201',
-      teacher_name: 'Prof. Kamal Hossain',
-      room_number: 'Room 304',
-      room_name: 'Science Wing',
-      is_completed: true,
-      is_live: false,
-      status: 'COMPLETED',
-    },
-    {
-      id: 2,
-      period_number: 2,
-      period_name: 'Period 2 (09:15 - 10:00)',
-      start_time: '09:15:00',
-      end_time: '10:00:00',
-      time_formatted: '09:15 - 10:00',
-      subject_name: 'Physics (Theory)',
-      subject_code: 'PHY-101',
-      teacher_name: 'Dr. Fatima Begum',
-      room_number: 'Room 301',
-      room_name: 'Main Academic Block',
-      is_completed: true,
-      is_live: false,
-      status: 'COMPLETED',
-    },
-    {
-      id: 3,
-      period_number: 3,
-      period_name: 'Period 3 (10:15 - 11:00)',
-      start_time: '10:15:00',
-      end_time: '11:00:00',
-      time_formatted: '10:15 - 11:00',
-      subject_name: 'Physics Practical (Lab)',
-      subject_code: 'PHY-102L',
-      teacher_name: 'Dr. Fatima Begum',
-      room_number: 'Lab 2',
-      room_name: 'Physics Laboratory',
-      is_completed: false,
-      is_live: true,
-      status: 'LIVE_NOW',
-    },
-    {
-      id: 4,
-      period_number: 4,
-      period_name: 'Period 4 (11:00 - 11:45)',
-      start_time: '11:00:00',
-      end_time: '11:45:00',
-      time_formatted: '11:00 - 11:45',
-      subject_name: 'English 1st Paper',
-      subject_code: 'ENG-101',
-      teacher_name: 'Prof. Anisur Rahman',
-      room_number: 'Room 304',
-      room_name: 'Science Wing',
-      is_completed: false,
-      is_live: false,
-      status: 'UPCOMING',
-    },
-    {
-      id: 5,
-      period_number: 5,
-      period_name: 'Period 5 (12:00 - 12:45)',
-      start_time: '12:00:00',
-      end_time: '12:45:00',
-      time_formatted: '12:00 - 12:45',
-      subject_name: 'Chemistry (Theory)',
-      subject_code: 'CHEM-101',
-      teacher_name: 'Prof. Nazrul Islam',
-      room_number: 'Room 302',
-      room_name: 'Main Academic Block',
-      is_completed: false,
-      is_live: false,
-      status: 'UPCOMING',
-    },
-  ],
+  today_timetable: [],
   attendance_summary: {
-    percentage: 96.8,
-    total_sessions: 125,
-    present_count: 119,
-    late_count: 2,
-    absent_count: 3,
-    excused_count: 1,
-    streak_days: 18,
-    status_label: 'EXCELLENT',
+    percentage: null,
+    total_sessions: 0,
+    present_count: 0,
+    late_count: 0,
+    absent_count: 0,
+    excused_count: 0,
+    streak_days: null,
+    status_label: 'NO_DATA',
   },
-  upcoming_examinations: [
-    {
-      id: 1,
-      exam_id: 12,
-      exam_name: 'Term 2 Final Examination 2026',
-      term_name: 'Annual Term',
-      subject_name: 'Higher Mathematics',
-      exam_date: '2026-11-05',
-      exam_date_formatted: 'Nov 05, 2026',
-      start_time: '09:00',
-      end_time: '12:00',
-      total_marks: 100,
-      pass_marks: 33,
-      days_left: 20,
-      days_left_label: 'In 20 days',
-    },
-    {
-      id: 2,
-      exam_id: 12,
-      exam_name: 'Term 2 Final Examination 2026',
-      term_name: 'Annual Term',
-      subject_name: 'Physics (Creative & MCQ)',
-      exam_date: '2026-11-08',
-      exam_date_formatted: 'Nov 08, 2026',
-      start_time: '09:00',
-      end_time: '12:00',
-      total_marks: 100,
-      pass_marks: 33,
-      days_left: 23,
-      days_left_label: 'In 23 days',
-    },
-  ],
-  published_results: [
-    {
-      id: 101,
-      exam_name: 'Half-Yearly Examination 2026',
-      term_name: 'Term 1',
-      published_at: '2026-06-28',
-      published_formatted: 'Jun 28, 2026',
-      gpa: 5.00,
-      final_grade: 'A+',
-      total_marks: 648.5,
-      class_rank: 3,
-      section_rank: 1,
-      is_passed: true,
-      marks_breakdown: [
-        { subject: 'Bangla 1st & 2nd', marks: 165, grade: 'A+', gpa: 5.0 },
-        { subject: 'English 1st & 2nd', marks: 172, grade: 'A+', gpa: 5.0 },
-        { subject: 'Higher Mathematics', marks: 94, grade: 'A+', gpa: 5.0 },
-        { subject: 'Physics', marks: 88, grade: 'A+', gpa: 5.0 },
-        { subject: 'Chemistry', marks: 85, grade: 'A+', gpa: 5.0 },
-      ],
-    },
-  ],
-  outstanding_invoices: [
-    {
-      id: 101,
-      invoice_number: 'INV-2026-0891',
-      title: 'Monthly Tuition & Laboratory Fee — October 2026',
-      month: 10,
-      year: 2026,
-      subtotal: 6500.00,
-      waiver_discount: 500.00,
-      fine_amount: 0.00,
-      total_payable: 6000.00,
-      total_paid: 0.00,
-      outstanding_balance: 6000.00,
-      due_date: '2026-10-25',
-      due_date_formatted: 'Oct 25, 2026',
-      is_overdue: false,
-      status: 'UNPAID',
-    },
-  ],
-  payment_history: [
-    {
-      id: 201,
-      receipt_number: 'REC-2026-0742',
-      invoice_number: 'INV-2026-0740',
-      amount: 6000.00,
-      payment_method: 'bKash Tokenized',
-      gateway_name: 'bKash',
-      gateway_transaction_id: 'BK_TRX_88A92B10',
-      paid_at: '2026-09-18',
-      paid_at_formatted: 'Sep 18, 2026',
-      status: 'PAID',
-    },
-    {
-      id: 202,
-      receipt_number: 'REC-2026-0619',
-      invoice_number: 'INV-2026-0615',
-      amount: 7500.00,
-      payment_method: 'SSLCommerz (Visa Card)',
-      gateway_name: 'SSLCommerz',
-      gateway_transaction_id: 'SSL_TRX_55C71D88',
-      paid_at: '2026-08-20',
-      paid_at_formatted: 'Aug 20, 2026',
-      status: 'PAID',
-    },
-  ],
-  homework: [
-    {
-      id: 1,
-      title: 'Newtonian Mechanics Problem Set (Ch. 4 Problems 1-15)',
-      subject_name: 'Physics',
-      teacher_name: 'Prof. Kamal Hossain',
-      assigned_date: '2026-10-14',
-      due_date: '2026-10-18',
-      due_date_formatted: 'Oct 18, 2026 (In 2 days)',
-      status: 'PENDING',
-      score: null,
-      instructions: 'Solve all exercises on frictional coefficients and circular centripetal acceleration in your lab notebook.',
-    },
-    {
-      id: 2,
-      title: 'Trigonometric Identities & Quadratic Systems Worksheet',
-      subject_name: 'Higher Mathematics',
-      teacher_name: 'Prof. Kamal Hossain',
-      assigned_date: '2026-10-12',
-      due_date: '2026-10-16',
-      due_date_formatted: 'Due Today (11:59 PM)',
-      status: 'SUBMITTED',
-      score: null,
-      instructions: 'Complete proofs for Section 7.2 compound angle identities.',
-    },
-    {
-      id: 3,
-      title: 'English 1st Paper: Formal Letter on Public Health & Pollution',
-      subject_name: 'English',
-      teacher_name: 'Prof. Anisur Rahman',
-      assigned_date: '2026-10-10',
-      due_date: '2026-10-14',
-      due_date_formatted: 'Oct 14, 2026',
-      status: 'EVALUATED',
-      score: '18/20 (A+)',
-      instructions: 'Draft a formal application to the City Mayor regarding neighborhood water drainage improvements.',
-    },
-  ],
-  notices: [
-    {
-      id: 1,
-      title: 'Term 2 Final Examination Routine & Seat Plan Published',
-      category: 'EXAMINATION',
-      priority: 'HIGH',
-      is_pinned: true,
-      summary: 'The official exam schedule for Classes 6-10 has been published. Please collect your admit cards before Nov 01.',
-      has_attachment: true,
-      attachment_url: '/documents/exam-routine-term2.pdf',
-      published_at: '2026-10-16T14:00:00Z',
-      published_formatted: '5 hours ago',
-    },
-    {
-      id: 2,
-      title: 'Annual Science & Tech Fair 2026 Project Submissions Open',
-      category: 'ACADEMIC',
-      priority: 'NORMAL',
-      is_pinned: false,
-      summary: 'Students from Grade 8-10 may register innovative robotics, physics, and software projects with their science teachers.',
-      has_attachment: true,
-      attachment_url: '/documents/science-fair-guidelines.pdf',
-      published_at: '2026-10-14T10:00:00Z',
-      published_formatted: '2 days ago',
-    },
-    {
-      id: 3,
-      title: 'Autumn Vacation & School Library Operating Hours Notice',
-      category: 'GENERAL',
-      priority: 'NORMAL',
-      is_pinned: false,
-      summary: 'The campus digital library and physical reading room will remain open from 09:00 AM to 02:00 PM during the study break.',
-      has_attachment: false,
-      attachment_url: null,
-      published_at: '2026-10-12T09:00:00Z',
-      published_formatted: '4 days ago',
-    },
-  ],
+  upcoming_examinations: [],
+  published_results: [],
+  outstanding_invoices: [],
+  payment_history: [],
+  homework: [],
+  notices: [],
 }
 
 async function fetchStudentDashboard(forceRefresh = false) {
@@ -489,16 +244,19 @@ async function fetchStudentDashboard(forceRefresh = false) {
     if (data && data.data) {
       dashboardData.value = data.data
     } else {
-      dashboardData.value = fallbackData
+      dashboardData.value = null
+      errorMessage.value = 'No dashboard information is available for your account yet. Please contact the school office.'
     }
-  } catch (err: any) {
-    dashboardData.value = fallbackData
+  } catch (err) {
+    // Show the real failure instead of silently rendering sample dues/grades as if they were real.
+    dashboardData.value = null
+    errorMessage.value = checkoutErrorMessage(err, 'Unable to load your dashboard right now. Please try again.')
   } finally {
     loading.value = false
   }
 }
 
-const current = computed<StudentOverviewData>(() => dashboardData.value || fallbackData)
+const current = computed<StudentOverviewData>(() => dashboardData.value || emptyData)
 
 const welcomeTitle = computed(() => {
   const studentName = current.value.profile.first_name || authStore.user?.name || 'Student'
@@ -506,14 +264,69 @@ const welcomeTitle = computed(() => {
 })
 
 const welcomeSubtitle = computed(() => {
-  return `${current.value.profile.class_name} • ${current.value.profile.section_name} (${current.value.profile.roll_number}) • ${current.value.profile.day_name}, ${formatDate(current.value.profile.summary_date)}`
+  const p = current.value.profile
+  const placement = p.class_name
+    ? `${p.class_name}${p.section_name ? ` • ${p.section_name}` : ''}${p.roll_number ? ` (${p.roll_number})` : ''}`
+    : 'Not enrolled in a class yet'
+  return `${placement} • ${p.day_name}, ${formatDate(p.summary_date)}`
 })
 
 // Student Online Payment Modal State
 const showPayModal = ref(false)
 const selectedPayInvoice = ref<OutstandingInvoice | null>(null)
-const selectedChannel = ref<'bkash' | 'sslcommerz' | 'nagad'>('bkash')
+const selectedGateway = ref<GatewayChoice>('BKASH')
+const payAmount = ref<number | null>(null)
 const processingPayment = ref(false)
+const payError = ref<string | null>(null)
+
+type GatewayChoice = 'BKASH' | 'SSLCOMMERZ'
+
+function checkoutErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { message?: string; response?: { data?: { message?: string } } } | null
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+/**
+ * Start a real gateway checkout. The gateway redirects back here with ?payment_status=...,
+ * and the dashboard is re-fetched from the server then (no optimistic balance changes).
+ */
+async function startGatewayCheckout(invoiceId: number, gateway: GatewayChoice, amount: number): Promise<void> {
+  const res = await api.post<{ data: { redirect_url?: string } }>('/api/v1/finance/online/initiate', {
+    invoice_id: invoiceId,
+    gateway_name: gateway,
+    amount,
+    return_path: route.path,
+  })
+  const redirectUrl = res.data?.data?.redirect_url
+  if (!redirectUrl) {
+    throw new Error('The payment gateway did not return a checkout page. Please try again later.')
+  }
+  window.location.href = redirectUrl
+}
+
+/** Show the result of a gateway return and drop the query params so a reload doesn't repeat it. */
+function handleGatewayReturn(): boolean {
+  const status = route.query.payment_status
+  if (typeof status !== 'string') return false
+  const ref = typeof route.query.tracking_ref === 'string' ? route.query.tracking_ref : ''
+  const messages: Record<string, { severity: 'success' | 'info' | 'warn' | 'error'; summary: string; detail: string }> = {
+    success: { severity: 'success', summary: 'Payment received', detail: `Your payment ${ref} was confirmed.` },
+    pending: { severity: 'info', summary: 'Payment being confirmed', detail: `The gateway is still confirming ${ref}. Please do not pay again; check back shortly.` },
+    cancelled: { severity: 'warn', summary: 'Payment cancelled', detail: 'The online payment was cancelled. No money was taken.' },
+    failed: { severity: 'error', summary: 'Payment not completed', detail: `The online payment ${ref} could not be completed.` },
+  }
+  const msg = messages[status] ?? messages.failed
+  toast.add({ ...msg, life: 7000 })
+  const { payment_status: _ps, tracking_ref: _tr, ...rest } = route.query
+  router.replace({ query: rest })
+  return true
+}
+
+const payAmountValid = computed(() => {
+  const inv = selectedPayInvoice.value
+  const amt = Number(payAmount.value)
+  return !!inv && amt >= 1 && amt <= Number(inv.outstanding_balance) + 0.001
+})
 
 function openOnlinePaymentModal(invoice?: OutstandingInvoice) {
   if (invoice) {
@@ -523,80 +336,28 @@ function openOnlinePaymentModal(invoice?: OutstandingInvoice) {
   } else {
     toast.add({
       severity: 'info',
-      summary: 'No Dues Pending',
-      detail: 'You have no outstanding tuition invoices to pay.',
+      summary: 'No dues pending',
+      detail: 'You have no outstanding invoices to pay.',
       life: 3000,
     })
     return
   }
-  selectedChannel.value = 'bkash'
+  selectedGateway.value = 'BKASH'
+  payAmount.value = Number(selectedPayInvoice.value.outstanding_balance)
+  payError.value = null
   showPayModal.value = true
 }
 
 async function confirmOnlinePayment() {
-  if (!selectedPayInvoice.value) return
-  processingPayment.value = true
   const inv = selectedPayInvoice.value
-  const amountToPay = inv.outstanding_balance
-  const idempotencyKey = `PAY-ONLINE-${inv.id}-${Date.now()}`
-
+  if (!inv || !payAmountValid.value || processingPayment.value) return
+  processingPayment.value = true
+  payError.value = null
   try {
-    const channelName = selectedChannel.value === 'bkash'
-      ? 'bKash Tokenized'
-      : (selectedChannel.value === 'nagad' ? 'Nagad Online' : 'SSLCommerz (Cards/NetBanking)')
-
-    const res = await api.post(
-      '/api/v1/finance/payments/collect',
-      {
-        invoice_id: inv.id,
-        amount: amountToPay,
-        payment_method: channelName,
-        paid_at: new Date().toISOString().substring(0, 10),
-        notes: `Online Checkout via ${selectedChannel.value.toUpperCase()}`,
-        idempotency_key: idempotencyKey,
-      },
-      {
-        headers: { 'Idempotency-Key': idempotencyKey },
-      }
-    )
-
-    const receiptNo = res.data?.data?.receipt_number || `REC-${Date.now().toString().slice(-6)}`
-
-    // Remove or update the invoice in local dashboard state
-    const idx = current.value.outstanding_invoices.findIndex((i) => i.id === inv.id)
-    if (idx !== -1) {
-      current.value.outstanding_invoices.splice(idx, 1)
-    }
-    current.value.kpis.outstanding_dues = Math.max(0, current.value.kpis.outstanding_dues - amountToPay)
-
-    current.value.payment_history.unshift({
-      id: Date.now(),
-      receipt_number: receiptNo,
-      invoice_number: inv.invoice_number,
-      amount: amountToPay,
-      payment_method: channelName,
-      gateway_name: selectedChannel.value.toUpperCase(),
-      gateway_transaction_id: `TXN-${selectedChannel.value.slice(0, 2).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`,
-      paid_at: new Date().toISOString().substring(0, 10),
-      paid_at_formatted: 'Today',
-      status: 'PAID',
-    })
-
-    showPayModal.value = false
-    toast.add({
-      severity: 'success',
-      summary: 'Payment Successful',
-      detail: `Paid ${formatBDT(amountToPay)} for ${inv.invoice_number}. Receipt: ${receiptNo}`,
-      life: 5000,
-    })
-  } catch (err: any) {
-    toast.add({
-      severity: 'error',
-      summary: 'Payment Failed',
-      detail: err.response?.data?.message || err.message || 'Payment gateway could not process transaction.',
-      life: 4000,
-    })
-  } finally {
+    await startGatewayCheckout(inv.id, selectedGateway.value, Math.round(Number(payAmount.value) * 100) / 100)
+    // Browser is navigating to the gateway; keep the button busy.
+  } catch (err) {
+    payError.value = checkoutErrorMessage(err, 'Could not start the online payment. Please try again.')
     processingPayment.value = false
   }
 }
@@ -611,7 +372,9 @@ function viewNotice(notice: NoticeItem) {
 }
 
 onMounted(() => {
-  fetchStudentDashboard()
+  // Returning from the gateway: always re-read balances from the server.
+  const returned = handleGatewayReturn()
+  fetchStudentDashboard(returned)
 })
 </script>
 
@@ -621,12 +384,11 @@ onMounted(() => {
     <PageHeader
       :title="welcomeTitle"
       :subtitle="welcomeSubtitle"
-      icon="pi pi-graduation-cap"
     >
       <template #actions>
         <span class="student-uid-pill">
           <i class="pi pi-id-card"></i>
-          <span>{{ current.profile.student_uid }}</span>
+          <span>{{ current.profile.student_uid || '—' }}</span>
         </span>
 
         <AppButton
@@ -669,11 +431,12 @@ onMounted(() => {
             <div class="kpi-icon"><i class="pi pi-check-circle"></i></div>
           </div>
           <div class="kpi-content">
-            <h2 class="kpi-number">{{ current.attendance_summary.percentage }}%</h2>
-            <span class="kpi-meta">
+            <h2 class="kpi-number">{{ current.attendance_summary.percentage != null ? `${current.attendance_summary.percentage}%` : '—' }}</h2>
+            <span v-if="current.attendance_summary.streak_days != null" class="kpi-meta">
               <i class="pi pi-bolt text-amber-500"></i>
               <strong>{{ current.attendance_summary.streak_days }} days</strong> current present streak
             </span>
+            <span v-else-if="current.attendance_summary.total_sessions === 0" class="kpi-meta">No attendance recorded yet</span>
           </div>
         </div>
 
@@ -684,8 +447,17 @@ onMounted(() => {
             <div class="kpi-icon"><i class="pi pi-star"></i></div>
           </div>
           <div class="kpi-content">
-            <h2 class="kpi-number">GPA {{ current.kpis.latest_gpa.toFixed(2) }}</h2>
-            <span class="kpi-meta">Grade <strong>{{ current.kpis.latest_grade }}</strong> (Half-Yearly Examination)</span>
+            <template v-if="current.kpis.latest_gpa != null">
+              <h2 class="kpi-number">GPA {{ current.kpis.latest_gpa.toFixed(2) }}</h2>
+              <span class="kpi-meta">
+                Grade <strong>{{ current.kpis.latest_grade }}</strong>
+                <template v-if="current.published_results[0]?.exam_name">({{ current.published_results[0].exam_name }})</template>
+              </span>
+            </template>
+            <template v-else>
+              <h2 class="kpi-number">—</h2>
+              <span class="kpi-meta">No published results yet</span>
+            </template>
           </div>
         </div>
 
@@ -805,15 +577,15 @@ onMounted(() => {
             <!-- Attendance Radial / Gauge Card -->
             <div class="attendance-gauge-box">
               <div class="gauge-center">
-                <span class="gauge-rate">{{ current.attendance_summary.percentage }}%</span>
-                <span class="gauge-status">{{ current.attendance_summary.status_label }} STANDING</span>
+                <span class="gauge-rate">{{ current.attendance_summary.percentage != null ? `${current.attendance_summary.percentage}%` : '—' }}</span>
+                <span class="gauge-status">{{ current.attendance_summary.status_label === 'NO_DATA' ? 'NO RECORDS YET' : `${current.attendance_summary.status_label} STANDING` }}</span>
               </div>
               <div class="gauge-meta">
                 <div class="gauge-meta-item">
                   <span class="label">Total Marked</span>
                   <span class="val">{{ current.attendance_summary.total_sessions }} Days</span>
                 </div>
-                <div class="gauge-meta-item">
+                <div v-if="current.attendance_summary.streak_days != null" class="gauge-meta-item">
                   <span class="label">Active Streak</span>
                   <span class="val text-emerald-600">{{ current.attendance_summary.streak_days }} Days</span>
                 </div>
@@ -928,10 +700,11 @@ onMounted(() => {
                   <span>Point</span>
                 </div>
                 <div v-for="(subj, idx) in res.marks_breakdown" :key="idx" class="marks-table-row">
-                  <span class="font-medium text-slate-800">{{ subj.subject }}</span>
-                  <span class="font-bold">{{ subj.marks }}</span>
-                  <span class="grade-badge">{{ subj.grade }}</span>
-                  <span class="font-semibold">{{ subj.gpa.toFixed(1) }}</span>
+                  <!-- Published snapshots use subject_name/total_obtained/letter_grade/grade_point -->
+                  <span class="font-medium text-slate-800">{{ subj.subject ?? subj.subject_name }}</span>
+                  <span class="font-bold">{{ subj.marks ?? subj.total_obtained }}</span>
+                  <span class="grade-badge">{{ subj.grade ?? subj.letter_grade }}</span>
+                  <span class="font-semibold">{{ Number(subj.gpa ?? subj.grade_point ?? 0).toFixed(1) }}</span>
                 </div>
               </div>
 
@@ -1099,8 +872,8 @@ onMounted(() => {
     <Dialog
       v-model:visible="showPayModal"
       modal
-      header="Online Tuition Fee Payment"
-      :style="{ width: '480px' }"
+      header="Pay Fees Online"
+      :style="{ width: '480px', maxWidth: '95vw' }"
     >
       <div v-if="selectedPayInvoice" class="student-pay-dialog-content">
         <div class="pay-invoice-summary">
@@ -1123,42 +896,59 @@ onMounted(() => {
         </div>
 
         <div class="channel-select-group">
-          <label class="channel-label">Select Payment Gateway</label>
-          <div class="channel-options">
-            <div
+          <label class="channel-label" for="studentPayAmount">Amount to pay (৳)</label>
+          <input
+            id="studentPayAmount"
+            v-model.number="payAmount"
+            type="number"
+            min="1"
+            step="0.01"
+            :max="selectedPayInvoice.outstanding_balance"
+            class="pay-amount-input"
+          />
+          <small class="text-xs text-slate-500">
+            Pay the full balance or part of it (up to {{ formatBDT(selectedPayInvoice.outstanding_balance) }}).
+          </small>
+        </div>
+
+        <div class="channel-select-group">
+          <span class="channel-label">Payment method</span>
+          <div class="channel-options" role="radiogroup" aria-label="Payment method">
+            <button
+              type="button"
               class="channel-card"
-              :class="{ selected: selectedChannel === 'bkash' }"
-              @click="selectedChannel = 'bkash'"
+              role="radio"
+              :aria-checked="selectedGateway === 'BKASH'"
+              :class="{ selected: selectedGateway === 'BKASH' }"
+              @click="selectedGateway = 'BKASH'"
             >
               <i class="pi pi-mobile text-pink-600"></i>
-              <span>bKash Tokenized Payment</span>
-            </div>
-            <div
+              <span>bKash</span>
+            </button>
+            <button
+              type="button"
               class="channel-card"
-              :class="{ selected: selectedChannel === 'sslcommerz' }"
-              @click="selectedChannel = 'sslcommerz'"
+              role="radio"
+              :aria-checked="selectedGateway === 'SSLCOMMERZ'"
+              :class="{ selected: selectedGateway === 'SSLCOMMERZ' }"
+              @click="selectedGateway = 'SSLCOMMERZ'"
             >
               <i class="pi pi-globe text-blue-600"></i>
-              <span>SSLCommerz (Cards & Net Banking)</span>
-            </div>
-            <div
-              class="channel-card"
-              :class="{ selected: selectedChannel === 'nagad' }"
-              @click="selectedChannel = 'nagad'"
-            >
-              <i class="pi pi-wallet text-orange-600"></i>
-              <span>Nagad Online</span>
-            </div>
+              <span>Card / Net banking (SSLCommerz)</span>
+            </button>
           </div>
         </div>
+
+        <p v-if="payError" class="text-xs text-red-600 mt-2" role="alert">{{ payError }}</p>
       </div>
 
       <template #footer>
         <AppButton label="Cancel" severity="secondary" text @click="showPayModal = false" />
         <AppButton
-          label="Proceed to Secure Checkout"
-          icon="pi pi-shield"
+          label="Continue to Payment"
+          icon="pi pi-arrow-right"
           severity="success"
+          :disabled="!payAmountValid"
           :loading="processingPayment"
           @click="confirmOnlinePayment"
         />
@@ -1168,6 +958,15 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.pay-amount-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+}
+
 .student-dashboard {
   display: flex;
   flex-direction: column;

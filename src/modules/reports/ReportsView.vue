@@ -1,349 +1,296 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
-import { PageHeader } from '@/components/common'
-import { DataTableWrapper } from '@/components/tables'
-import { StatusBadge, AppAlert } from '@/components/notifications'
-import { FormField, AppSelect, AppInput, AppButton } from '@/components/forms'
-import { formatDateTime } from '@/utils/formatters'
+import api, { type ApiNormalizedError } from '@/services/api'
+import { PageHeader, DataTableWrapper, StatusBadge, FormField } from '@/components/common'
+import { AppSelect, AppInput, AppButton } from '@/components/forms'
+import { formatDateTime, formatBytes } from '@/utils/formatters'
 
-const toast = useToast()
+type ReportCategory = 'academic' | 'financial' | 'operational'
 
-interface ReportJob {
-  id: string
-  title: string
-  category: 'academic' | 'financial' | 'operational'
-  format: 'PDF' | 'CSV' | 'XLSX'
-  requestedBy: string
-  status: 'COMPLETED' | 'PROCESSING' | 'QUEUED'
-  recordsCount: number
-  generatedAt: string
-  fileSize: string
+interface ReportTypeOption {
+  label: string
+  value: string
+  category: ReportCategory
 }
 
-const reportDomain = ref<'all' | 'academic' | 'financial' | 'operational'>('all')
+/** Export report types accepted by POST /api/v1/reports/export/queue (exam-specific types need an exam and are exported from Exams). */
+const REPORT_TYPES: ReportTypeOption[] = [
+  { label: 'Attendance summary', value: 'ATTENDANCE_SUMMARY', category: 'academic' },
+  { label: 'Collection by payment method', value: 'COLLECTION_BY_METHOD', category: 'financial' },
+  { label: 'Invoice aging', value: 'INVOICE_AGING', category: 'financial' },
+  { label: 'Refunds ledger', value: 'REFUNDS_LEDGER', category: 'financial' },
+  { label: 'Cashier closing', value: 'CASHIER_CLOSING', category: 'financial' },
+  { label: 'Enrollment summary', value: 'ENROLLMENT_SUMMARY', category: 'operational' },
+  { label: 'Teacher workload', value: 'TEACHER_WORKLOAD', category: 'operational' },
+  { label: 'Timetable conflicts', value: 'TIMETABLE_CONFLICTS', category: 'operational' },
+  { label: 'Notification delivery', value: 'NOTIFICATION_DELIVERY', category: 'operational' },
+  { label: 'School overview', value: 'ADMIN_OVERVIEW', category: 'operational' },
+]
 
-const jobs = ref<ReportJob[]>([
-  {
-    id: 'REP-2026-001',
-    title: 'Daily Fee Collection & Gateway Settlement Summary',
-    category: 'financial',
-    format: 'PDF',
-    requestedBy: 'System Administrator',
-    status: 'COMPLETED',
-    recordsCount: 420,
-    generatedAt: '2026-10-16T17:00:00Z',
-    fileSize: '1.4 MB',
-  },
-  {
-    id: 'REP-2026-002',
-    title: 'Grade 10 Mid-Term Tabulation & GPA Distribution',
-    category: 'academic',
-    format: 'XLSX',
-    requestedBy: 'Exam Controller',
-    status: 'COMPLETED',
-    recordsCount: 180,
-    generatedAt: '2026-10-16T15:30:00Z',
-    fileSize: '840 KB',
-  },
-  {
-    id: 'REP-2026-003',
-    title: 'Institutional Monthly Attendance & Absence Threshold Report',
-    category: 'academic',
-    format: 'CSV',
-    requestedBy: 'Principal Office',
-    status: 'COMPLETED',
-    recordsCount: 1250,
-    generatedAt: '2026-10-16T12:00:00Z',
-    fileSize: '3.1 MB',
-  },
-  {
-    id: 'REP-2026-004',
-    title: 'Overdue Invoice Aging & Defaulter Registry (30+ Days)',
-    category: 'financial',
-    format: 'PDF',
-    requestedBy: 'Accounts Officer',
-    status: 'QUEUED',
-    recordsCount: 65,
-    generatedAt: '2026-10-16T16:45:00Z',
-    fileSize: 'Pending',
-  },
-])
+interface ExportJob {
+  uuid: string
+  report_type: string
+  status: string
+  row_count?: number | null
+  file_size?: number | null
+  completed_at?: string | null
+  expires_at?: string | null
+  signed_download_url?: string | null
+  requested_at: string
+}
 
-// Report generation modal state
+const STORAGE_KEY = 'evergreen.report-exports'
+const toast = useToast()
+
+const reportDomain = ref<'all' | ReportCategory>('all')
+const jobs = ref<ExportJob[]>([])
+const refreshing = ref(false)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 const showGenerateModal = ref(false)
 const generating = ref(false)
 const newReportForm = ref({
-  category: 'academic' as 'academic' | 'financial' | 'operational',
-  type: 'attendance_summary',
-  format: 'PDF' as 'PDF' | 'CSV' | 'XLSX',
-  academicYear: '2026',
-  dateFrom: '2026-10-01',
-  dateTo: '2026-10-16',
+  category: 'academic' as ReportCategory,
+  type: 'ATTENDANCE_SUMMARY',
+  dateFrom: '',
+  dateTo: '',
 })
 
-const reportTypeOptions = computed(() => {
-  if (newReportForm.value.category === 'academic') {
-    return [
-      { label: 'Attendance by Class & Date Range', value: 'attendance_summary' },
-      { label: 'Term Examination Tabulation & GPA', value: 'exam_results' },
-      { label: 'Subject Performance & Pass Rates', value: 'subject_performance' },
-      { label: 'Student Promotion & Enrollment History', value: 'promotion_history' },
-    ]
-  } else if (newReportForm.value.category === 'financial') {
-    return [
-      { label: 'Collection Breakdown by Payment Method', value: 'collection_by_gateway' },
-      { label: 'Invoice Aging & Dues Defaulters', value: 'invoice_aging' },
-      { label: 'Approved Fee Waivers & Sibling Discounts', value: 'waivers_audit' },
-      { label: 'Gateway Reconciliation & Cashier Closing', value: 'reconciliation_closing' },
-    ]
-  } else {
-    return [
-      { label: 'Enrollment Distribution by Campus/Class', value: 'campus_enrollment' },
-      { label: 'Teacher Workload & Substitution Log', value: 'teacher_workload' },
-      { label: 'Timetable Scheduling Conflict Audit', value: 'timetable_conflicts' },
-      { label: 'SMS & Email Notification Delivery Logs', value: 'notification_delivery' },
-    ]
-  }
-})
+const reportTypeOptions = computed(() => REPORT_TYPES.filter((t) => t.category === newReportForm.value.category))
+
+function typeMeta(type: string): ReportTypeOption | undefined {
+  return REPORT_TYPES.find((t) => t.value === type)
+}
 
 const filteredJobs = computed(() => {
   if (reportDomain.value === 'all') return jobs.value
-  return jobs.value.filter(j => j.category === reportDomain.value)
+  return jobs.value.filter((j) => typeMeta(j.report_type)?.category === reportDomain.value)
 })
+
+function persistJobs() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(jobs.value.map((j) => ({ uuid: j.uuid, report_type: j.report_type, requested_at: j.requested_at }))),
+    )
+  } catch {
+    /* storage unavailable — the list simply won't survive a reload */
+  }
+}
+
+function loadStoredJobs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Array<Pick<ExportJob, 'uuid' | 'report_type' | 'requested_at'>>
+    jobs.value = parsed.map((p) => ({ ...p, status: 'PENDING' }))
+  } catch {
+    jobs.value = []
+  }
+}
+
+async function refreshJob(job: ExportJob) {
+  try {
+    const { data } = await api.get(`/api/v1/reports/exports/${job.uuid}`)
+    Object.assign(job, data.data ?? data)
+  } catch (err) {
+    if ((err as ApiNormalizedError).status === 404) {
+      jobs.value = jobs.value.filter((j) => j.uuid !== job.uuid)
+      persistJobs()
+    }
+  }
+}
+
+async function refreshAll() {
+  refreshing.value = true
+  try {
+    await Promise.all(jobs.value.map(refreshJob))
+  } finally {
+    refreshing.value = false
+  }
+}
+
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = setInterval(async () => {
+    const pending = jobs.value.filter((j) => j.status === 'PENDING' || j.status === 'PROCESSING')
+    if (pending.length === 0) {
+      stopPolling()
+      return
+    }
+    await Promise.all(pending.map(refreshJob))
+  }, 4000)
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
+}
+
+function onCategoryChange() {
+  newReportForm.value.type = reportTypeOptions.value[0]?.value ?? ''
+}
 
 async function queueReportGeneration() {
   generating.value = true
   try {
-    await new Promise(r => setTimeout(r, 800))
-    const selectedOption = reportTypeOptions.value.find(o => o.value === newReportForm.value.type)
-    const newJob: ReportJob = {
-      id: `REP-2026-${String(jobs.value.length + 1).padStart(3, '0')}`,
-      title: selectedOption ? selectedOption.label : 'Institutional Report',
-      category: newReportForm.value.category,
-      format: newReportForm.value.format,
-      requestedBy: 'Current User',
-      status: 'PROCESSING',
-      recordsCount: 0,
-      generatedAt: new Date().toISOString(),
-      fileSize: 'Processing...',
-    }
-    jobs.value.unshift(newJob)
-    showGenerateModal.value = false
-    toast.add({
-      severity: 'info',
-      summary: 'Report Queued',
-      detail: `Asynchronous job #${newJob.id} dispatched to Redis background worker.`,
-      life: 5000,
-    })
+    const payload: Record<string, string> = { report_type: newReportForm.value.type, format: 'csv' }
+    if (newReportForm.value.dateFrom) payload.start_date = newReportForm.value.dateFrom
+    if (newReportForm.value.dateTo) payload.end_date = newReportForm.value.dateTo
 
-    // Simulate completion
-    setTimeout(() => {
-      newJob.status = 'COMPLETED'
-      newJob.recordsCount = Math.floor(150 + Math.random() * 850)
-      newJob.fileSize = '1.8 MB'
-    }, 2500)
+    const { data } = await api.post('/api/v1/reports/export/queue', payload)
+    const created = data.data ?? data
+    jobs.value.unshift({ ...created, requested_at: new Date().toISOString() })
+    persistJobs()
+    showGenerateModal.value = false
+    toast.add({ severity: 'success', summary: 'Report queued', detail: 'The export will be ready to download shortly.', life: 4000 })
+    startPolling()
+  } catch (err) {
+    toast.add({ severity: 'error', summary: 'Could not queue report', detail: (err as ApiNormalizedError).message, life: 5000 })
   } finally {
     generating.value = false
   }
 }
 
-function downloadReport(job: ReportJob) {
-  toast.add({
-    severity: 'success',
-    summary: 'Report Download Started',
-    detail: `Secured temporary download token issued for ${job.id}.${job.format.toLowerCase()}`,
-    life: 3000,
-  })
+function downloadReport(job: ExportJob) {
+  if (job.signed_download_url) {
+    window.open(job.signed_download_url, '_blank', 'noopener')
+  }
 }
+
+function removeJob(job: ExportJob) {
+  jobs.value = jobs.value.filter((j) => j.uuid !== job.uuid)
+  persistJobs()
+}
+
+onMounted(async () => {
+  loadStoredJobs()
+  if (jobs.value.length) {
+    await refreshAll()
+    startPolling()
+  }
+})
+
+onBeforeUnmount(stopPolling)
 </script>
 
 <template>
   <div class="reports-view-container">
-    <PageHeader
-      title="Institutional Reports & Exports"
-      subtitle="Audited academic tabulation, multi-channel financial reconciliations, and operational workload analytics."
-      icon="pi pi-file-excel"
-    >
+    <PageHeader title="Reports" subtitle="Export academic, financial and operational reports as CSV.">
       <template #actions>
-        <AppButton
-          label="Generate Report"
-          icon="pi pi-plus"
-          severity="primary"
-          @click="showGenerateModal = true"
-        />
+        <AppButton label="New export" icon="pi pi-plus" @click="showGenerateModal = true" />
       </template>
     </PageHeader>
 
-    <!-- Quick Report Domain Selectors -->
     <div class="domain-pills">
-      <button
-        type="button"
-        class="domain-btn"
-        :class="{ active: reportDomain === 'all' }"
-        @click="reportDomain = 'all'"
-      >
-        <i class="pi pi-th-large"></i> All Reports
-      </button>
-      <button
-        type="button"
-        class="domain-btn"
-        :class="{ active: reportDomain === 'academic' }"
-        @click="reportDomain = 'academic'"
-      >
-        <i class="pi pi-book"></i> Academic Analytics
-      </button>
-      <button
-        type="button"
-        class="domain-btn"
-        :class="{ active: reportDomain === 'financial' }"
-        @click="reportDomain = 'financial'"
-      >
-        <i class="pi pi-dollar"></i> Financial Audits
-      </button>
-      <button
-        type="button"
-        class="domain-btn"
-        :class="{ active: reportDomain === 'operational' }"
-        @click="reportDomain = 'operational'"
-      >
-        <i class="pi pi-cog"></i> Operational Logs
-      </button>
+      <button type="button" class="domain-btn" :class="{ active: reportDomain === 'all' }" @click="reportDomain = 'all'">All</button>
+      <button type="button" class="domain-btn" :class="{ active: reportDomain === 'academic' }" @click="reportDomain = 'academic'">Academic</button>
+      <button type="button" class="domain-btn" :class="{ active: reportDomain === 'financial' }" @click="reportDomain = 'financial'">Financial</button>
+      <button type="button" class="domain-btn" :class="{ active: reportDomain === 'operational' }" @click="reportDomain = 'operational'">Operational</button>
     </div>
 
-    <!-- Security & Audit Alert Banner -->
-    <AppAlert
-      severity="info"
-      title="Audited Export Governance"
-      message="All dataset exports are asynchronously queued, restricted by institutional tenant boundaries, and protected against public URL leaks."
-    />
-
-    <!-- Reports Job Table -->
     <div class="reports-ledger-card">
       <DataTableWrapper
         :value="filteredJobs"
-        :totalRecords="filteredJobs.length"
-        searchPlaceholder="Search generated reports..."
+        :loading="refreshing"
+        :showSearch="false"
+        emptyTitle="No exports yet"
+        emptyMessage="Exports you request appear here until their download link expires."
+        @refresh="refreshAll"
       >
-        <Column field="id" header="Job ID" sortable>
-          <template #body="{ data }">
-            <span class="font-mono text-xs font-bold text-slate-800">{{ data.id }}</span>
-          </template>
-        </Column>
-
-        <Column field="title" header="Report Title" sortable>
+        <Column field="report_type" header="Report">
           <template #body="{ data }">
             <div class="report-meta">
-              <span class="report-title-text">{{ data.title }}</span>
-              <span class="report-category-pill" :class="`cat-${data.category}`">
-                {{ data.category.toUpperCase() }}
+              <span class="report-title-text">{{ typeMeta(data.report_type)?.label ?? data.report_type }}</span>
+              <span class="report-category-pill" :class="`cat-${typeMeta(data.report_type)?.category ?? 'operational'}`">
+                {{ typeMeta(data.report_type)?.category ?? 'report' }}
               </span>
             </div>
           </template>
         </Column>
 
-        <Column field="format" header="Format">
+        <Column field="row_count" header="Rows">
           <template #body="{ data }">
-            <span class="format-badge" :class="`fmt-${data.format.toLowerCase()}`">
-              {{ data.format }}
-            </span>
+            <span class="text-sm">{{ data.row_count ? data.row_count.toLocaleString() : '—' }}</span>
           </template>
         </Column>
 
-        <Column field="recordsCount" header="Records" sortable>
+        <Column field="file_size" header="Size">
           <template #body="{ data }">
-            <span class="text-sm font-semibold">{{ data.recordsCount > 0 ? data.recordsCount.toLocaleString() : '—' }}</span>
+            <span class="text-sm">{{ data.file_size ? formatBytes(data.file_size) : '—' }}</span>
           </template>
         </Column>
 
-        <Column field="status" header="Worker Status" sortable>
+        <Column field="status" header="Status">
           <template #body="{ data }">
             <StatusBadge :status="data.status" showDot />
           </template>
         </Column>
 
-        <Column field="generatedAt" header="Requested At" sortable>
+        <Column field="requested_at" header="Requested">
           <template #body="{ data }">
-            <span class="text-xs text-slate-500">{{ formatDateTime(data.generatedAt) }}</span>
+            <span class="text-xs text-slate-500">{{ formatDateTime(data.requested_at) }}</span>
           </template>
         </Column>
 
         <Column header="Actions">
           <template #body="{ data }">
-            <AppButton
-              v-if="data.status === 'COMPLETED'"
-              icon="pi pi-download"
-              label="Download"
-              size="small"
-              severity="secondary"
-              outlined
-              @click="downloadReport(data)"
-            />
-            <span v-else class="text-xs text-slate-400 italic">Processing...</span>
+            <div class="row-actions">
+              <AppButton
+                v-if="data.status === 'COMPLETED' && data.signed_download_url"
+                icon="pi pi-download"
+                label="Download"
+                size="small"
+                severity="secondary"
+                outlined
+                @click="downloadReport(data)"
+              />
+              <span v-else-if="data.status === 'PENDING' || data.status === 'PROCESSING'" class="text-xs text-slate-400">Processing…</span>
+              <AppButton icon="pi pi-times" size="small" severity="secondary" text aria-label="Remove from list" @click="removeJob(data)" />
+            </div>
           </template>
         </Column>
       </DataTableWrapper>
     </div>
 
-    <!-- Generate Report Dialog -->
     <Dialog
       v-model:visible="showGenerateModal"
       modal
-      header="Queue Institutional Report Generation"
-      :style="{ width: '540px' }"
+      header="New report export"
+      :style="{ width: '520px', maxWidth: '95vw' }"
     >
-      <form @submit.prevent="queueReportGeneration" class="dialog-form">
-        <FormField id="repCat" label="Report Category" required>
+      <form class="dialog-form" @submit.prevent="queueReportGeneration">
+        <FormField id="repCat" label="Category" required>
           <AppSelect
             id="repCat"
             v-model="newReportForm.category"
             :options="[
-              { label: 'Academic & Examination Reports', value: 'academic' },
-              { label: 'Financial & Fee Collection Reports', value: 'financial' },
-              { label: 'Operational & Teacher Workload Reports', value: 'operational' },
+              { label: 'Academic', value: 'academic' },
+              { label: 'Financial', value: 'financial' },
+              { label: 'Operational', value: 'operational' },
             ]"
+            @update:modelValue="onCategoryChange"
           />
         </FormField>
 
-        <FormField id="repType" label="Report Type" required>
-          <AppSelect
-            id="repType"
-            v-model="newReportForm.type"
-            :options="reportTypeOptions"
-          />
+        <FormField id="repType" label="Report" required>
+          <AppSelect id="repType" v-model="newReportForm.type" :options="reportTypeOptions" />
         </FormField>
 
         <div class="form-row-2">
-          <FormField id="repFrom" label="From Date">
-            <AppInput id="repFrom" type="date" v-model="newReportForm.dateFrom" />
+          <FormField id="repFrom" label="From date">
+            <AppInput id="repFrom" v-model="newReportForm.dateFrom" type="date" />
           </FormField>
-          <FormField id="repTo" label="To Date">
-            <AppInput id="repTo" type="date" v-model="newReportForm.dateTo" />
+          <FormField id="repTo" label="To date">
+            <AppInput id="repTo" v-model="newReportForm.dateTo" type="date" />
           </FormField>
         </div>
 
-        <FormField id="repFmt" label="Export Output Format" required>
-          <AppSelect
-            id="repFmt"
-            v-model="newReportForm.format"
-            :options="[
-              { label: 'Adobe PDF Document (.pdf)', value: 'PDF' },
-              { label: 'Microsoft Excel Spreadsheet (.xlsx)', value: 'XLSX' },
-              { label: 'Raw Comma-Separated Values (.csv)', value: 'CSV' },
-            ]"
-          />
-        </FormField>
-
         <div class="dialog-actions">
           <AppButton label="Cancel" severity="secondary" text @click="showGenerateModal = false" />
-          <AppButton
-            type="submit"
-            label="Dispatch Background Job"
-            icon="pi pi-send"
-            severity="primary"
-            :loading="generating"
-          />
+          <AppButton type="submit" label="Queue export" icon="pi pi-send" :loading="generating" :disabled="!newReportForm.type" />
         </div>
       </form>
     </Dialog>
@@ -364,36 +311,33 @@ function downloadReport(job: ReportJob) {
 }
 
 .domain-btn {
-  padding: 0.55rem 1rem;
-  border-radius: 8px;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  border: 1px solid var(--surface-300);
   font-size: 0.825rem;
   font-weight: 600;
-  color: #334155;
+  color: var(--surface-700);
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
   transition: all 0.15s ease;
 }
 
 .domain-btn:hover {
-  background: #f8fafc;
-  border-color: #94a3b8;
+  background: var(--surface-50);
+  border-color: var(--surface-400);
 }
 
 .domain-btn.active {
-  background: #0f172a;
+  background: var(--primary-700);
   color: #ffffff;
-  border-color: #0f172a;
+  border-color: var(--primary-700);
 }
 
 .reports-ledger-card {
-  background: #ffffff;
+  background: var(--surface-0);
   padding: 1.25rem;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface-200);
 }
 
 .report-meta {
@@ -405,32 +349,28 @@ function downloadReport(job: ReportJob) {
 .report-title-text {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--surface-900);
 }
 
 .report-category-pill {
-  font-size: 0.65rem;
-  font-weight: 700;
+  font-size: 0.7rem;
+  font-weight: 600;
   display: inline-block;
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
   width: fit-content;
+  text-transform: capitalize;
 }
 
-.cat-academic { background: #e0f2fe; color: #0369a1; }
-.cat-financial { background: #dcfce7; color: #15803d; }
-.cat-operational { background: #fef3c7; color: #b45309; }
+.cat-academic { background: var(--color-info-bg); color: var(--color-info-text); }
+.cat-financial { background: var(--color-success-bg); color: var(--color-success-text); }
+.cat-operational { background: var(--color-warning-bg); color: var(--color-warning-text); }
 
-.format-badge {
-  font-size: 0.725rem;
-  font-weight: 700;
-  padding: 0.2rem 0.45rem;
-  border-radius: 4px;
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
-
-.fmt-pdf { background: #fee2e2; color: #b91c1c; }
-.fmt-xlsx { background: #dcfce7; color: #166534; }
-.fmt-csv { background: #f1f5f9; color: #475569; }
 
 .dialog-form {
   display: flex;

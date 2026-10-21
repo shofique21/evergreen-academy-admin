@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/services/api'
+import { formatBDT } from '@/utils/formatters'
 import { useNotification } from '@/composables/useNotification'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
@@ -314,7 +315,7 @@ function openTestDispatch(tpl: NotificationTemplate): void {
     roll_number: '12',
     exam_name: 'Annual Examination 2026',
     start_date: 'November 01, 2026',
-    amount: '4,500 BDT',
+    amount: formatBDT(4500),
     due_date: 'October 31, 2026',
     portal_url: window.location.origin + '/fees',
     payment_method: 'bKash Online',
@@ -591,8 +592,8 @@ onMounted(async () => {
 <template>
   <div class="communications-view">
     <PageHeader
-      title="Notice Board & Notification Hub"
-      subtitle="Public bulletin posts, targeted scoped announcements, transactional notification templates, and multi-channel delivery state tracking."
+      title="Notices"
+      subtitle="Notice board, announcements and your notifications."
     >
       <template #actions>
         <Button
@@ -635,25 +636,25 @@ onMounted(async () => {
         <div class="kpi-content">
           <span class="kpi-title">Targeted Broadcasts</span>
           <span class="kpi-value">{{ announcements.length }}</span>
-          <span class="kpi-sub">Multi-tier scope delivery</span>
+          <span class="kpi-sub">Targeted to classes, roles or people</span>
         </div>
       </div>
 
       <div class="kpi-card" @click="activeTab = 'templates'">
         <div class="kpi-icon templates-icon"><i class="pi pi-sliders-h"></i></div>
         <div class="kpi-content">
-          <span class="kpi-title">Transactional Templates</span>
-          <span class="kpi-value">7 Active</span>
-          <span class="kpi-sub">Closure, Routine, Fee, Absence</span>
+          <span class="kpi-title">Message Templates</span>
+          <span class="kpi-value">{{ templates.length || '—' }}</span>
+          <span class="kpi-sub">Automated notification templates</span>
         </div>
       </div>
 
       <div class="kpi-card" @click="activeTab = 'inbox'">
         <div class="kpi-icon inbox-icon"><i class="pi pi-bell"></i></div>
         <div class="kpi-content">
-          <span class="kpi-title">My In-App Inbox</span>
+          <span class="kpi-title">My Inbox</span>
           <span class="kpi-value text-primary">{{ unreadInboxCount }}</span>
-          <span class="kpi-sub">Unread direct notifications</span>
+          <span class="kpi-sub">Unread notifications</span>
         </div>
       </div>
     </div>
@@ -679,7 +680,7 @@ onMounted(async () => {
           @click="activeTab = 'announcements'"
         >
           <i class="pi pi-bullhorn"></i>
-          <span>Targeted Announcements</span>
+          <span>Announcements</span>
         </button>
 
         <button
@@ -689,8 +690,8 @@ onMounted(async () => {
           @click="activeTab = 'templates'"
         >
           <i class="pi pi-code"></i>
-          <span>Templates & Sandbox</span>
-          <span class="tab-badge">7 Pre-seeded</span>
+          <span>Templates</span>
+          <span v-if="templates.length" class="tab-badge">{{ templates.length }}</span>
         </button>
 
         <button
@@ -700,7 +701,7 @@ onMounted(async () => {
           @click="activeTab = 'inbox'"
         >
           <i class="pi pi-inbox"></i>
-          <span>My In-App Inbox</span>
+          <span>My Inbox</span>
           <span v-if="unreadInboxCount > 0" class="tab-badge danger">{{ unreadInboxCount }}</span>
         </button>
 
@@ -711,7 +712,7 @@ onMounted(async () => {
           @click="activeTab = 'preferences'"
         >
           <i class="pi pi-cog"></i>
-          <span>Channel Preferences</span>
+          <span>Preferences</span>
         </button>
 
         <button
@@ -722,7 +723,7 @@ onMounted(async () => {
           @click="activeTab = 'logs'"
         >
           <i class="pi pi-history"></i>
-          <span>Delivery Tracking & Logs</span>
+          <span>Delivery Logs</span>
         </button>
       </div>
     </div>
@@ -1322,8 +1323,8 @@ onMounted(async () => {
     <Dialog
       v-model:visible="postNoticeDialog"
       modal
-      header="Post Official Notice"
-      :style="{ width: '650px' }"
+      header="Post Notice"
+      :style="{ width: '650px', maxWidth: '95vw' }"
     >
       <form @submit.prevent="handleCreateNotice" class="dialog-form">
         <FormField label="Notice Title" required>
@@ -1425,8 +1426,8 @@ onMounted(async () => {
     <Dialog
       v-model:visible="createAnnouncementDialog"
       modal
-      header="Create Targeted Announcement"
-      :style="{ width: '700px' }"
+      header="New Announcement"
+      :style="{ width: '700px', maxWidth: '95vw' }"
     >
       <form @submit.prevent="handleCreateAnnouncement" class="dialog-form">
         <FormField label="Announcement Title" required>
@@ -1543,8 +1544,8 @@ onMounted(async () => {
     <Dialog
       v-model:visible="testDispatchDialog"
       modal
-      header="Test Notification Dispatch Sandbox"
-      :style="{ width: '600px' }"
+      header="Send Test Notification"
+      :style="{ width: '600px', maxWidth: '95vw' }"
     >
       <div v-if="selectedTemplate" class="sandbox-modal-body">
         <div class="sandbox-info">
@@ -1612,7 +1613,7 @@ onMounted(async () => {
       v-model:visible="editTemplateDialog"
       modal
       header="Edit Notification Template"
-      :style="{ width: '680px' }"
+      :style="{ width: '680px', maxWidth: '95vw' }"
     >
       <form v-if="editingTemplate" @submit.prevent="handleUpdateTemplate" class="dialog-form">
         <FormField label="Subject / Title Template" required>

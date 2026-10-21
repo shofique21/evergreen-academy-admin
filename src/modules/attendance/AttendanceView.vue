@@ -652,21 +652,20 @@ onMounted(async () => {
 <template>
   <div class="attendance-page">
     <PageHeader
-      :title="isStudent ? (authStore.persona === 'parent' ? 'Child Attendance Record' : 'My Attendance Record') : 'Attendance & Daily Roll-Call Engine'"
-      :subtitle="isStudent ? (authStore.persona === 'parent' ? 'Verified daily attendance percentage, punctuality record, and attendance history for your child' : 'Personal daily attendance rate, punctuality timestamps, and attendance history') : 'Comprehensive daily and period-wise attendance, parent absence notifications, backdated correction audit trails, and reporting'"
-      showBreadcrumbs
+      :title="isStudent ? (authStore.persona === 'parent' ? 'Child Attendance' : 'My Attendance') : 'Attendance'"
+      :subtitle="isStudent ? (authStore.persona === 'parent' ? 'Attendance rate and history for your child.' : 'Your attendance rate and history.') : 'Take roll call, review past sessions and view summaries.'"
     />
 
     <!-- Navigation Tab Bar (Hidden for Students) -->
     <div v-if="!isStudent" class="tab-pill-bar">
       <button class="tab-pill" :class="{ active: activeTab === 'take' }" @click="activeTab = 'take'">
-        <i class="pi pi-check-circle mr-1"></i> Roll Call (Take Attendance)
+        <i class="pi pi-check-circle mr-1"></i> Roll Call
       </button>
       <button class="tab-pill" :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'; fetchSessions(1)">
-        <i class="pi pi-history mr-1"></i> Sessions Ledger & History
+        <i class="pi pi-history mr-1"></i> History
       </button>
       <button class="tab-pill" :class="{ active: activeTab === 'reports' }" @click="onOpenReportsTab()">
-        <i class="pi pi-chart-bar mr-1"></i> Summaries & Analytics
+        <i class="pi pi-chart-bar mr-1"></i> Summaries
       </button>
     </div>
 
@@ -839,7 +838,7 @@ onMounted(async () => {
           icon="pi pi-check-circle"
           :loading="submittingRollCall"
           :disabled="currentSessionLockStatus || roster.length === 0"
-          class="brand-gradient-bg border-none px-6"
+          class="px-6"
           @click="handleSaveRollCall"
         />
       </div>
@@ -915,7 +914,6 @@ onMounted(async () => {
 
     <!-- 3. Summaries & Analytics Panel -->
     <div v-if="activeTab === 'reports'" class="flex flex-col gap-8">
-      
       <!-- 3.1. Analytics Filters & Range Configuration -->
       <div v-if="!isStudent" class="table-card glass-panel p-6 sm:p-7 flex flex-col gap-6">
         <!-- Header & Presets -->
@@ -991,7 +989,7 @@ onMounted(async () => {
             <Button
               label="Analyze Attendance"
               icon="pi pi-chart-pie"
-              class="brand-gradient-bg border-none attendance-filter-submit-btn"
+              class="attendance-filter-submit-btn"
               :loading="summaryLoading"
               @click="fetchSummary"
             />
@@ -1001,7 +999,6 @@ onMounted(async () => {
 
       <!-- 3.2. Analytics Results Panel (Rendered when summaryData is present) -->
       <div v-if="!isStudent && summaryData" class="table-card glass-panel p-6 sm:p-8 flex flex-col gap-8">
-        
         <!-- Active Context & Executive Health Summary Banner -->
         <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 bg-slate-50/90 border border-slate-200/80 rounded-2xl">
           <div class="flex items-center gap-3.5 flex-wrap">
@@ -1244,7 +1241,7 @@ onMounted(async () => {
       <div v-else-if="!isStudent && !summaryData" class="table-card glass-panel p-12 text-center bg-slate-50 border border-dashed border-slate-300 rounded-2xl">
         <i class="pi pi-chart-pie text-4xl text-slate-300 mb-3"></i>
         <h4 class="text-base font-bold text-slate-700">No Analytics Loaded Yet</h4>
-        <p class="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">Select a Class, Section, and Date Range above, then click "Analyze Attendance" to generate the performance ledger.</p>
+        <p class="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">Select a Class, Section, and Date Range above, then click "Analyze Attendance" to generate the report.</p>
       </div>
 
       <!-- 3.3. Student Individual Attendance Dossier Lookup / Student View -->
@@ -1252,7 +1249,7 @@ onMounted(async () => {
         <div class="flex justify-between items-start flex-wrap gap-3 pb-5 border-b border-slate-200/80">
           <div>
             <h3 class="text-base font-bold text-slate-800 tracking-tight">
-              {{ isStudent ? 'My Attendance Telemetry & Record' : 'Individual Student Attendance Dossier' }}
+              {{ isStudent ? 'My attendance' : 'Student attendance' }}
             </h3>
             <p class="text-xs text-slate-500 mt-1">
               {{ isStudent ? 'Your official presence percentage, punctuality record, and attendance history' : 'Inspect granular daily attendance records, punctuality stamps, and audit correction logs for any student' }}
@@ -1302,7 +1299,7 @@ onMounted(async () => {
                 label="Search"
                 icon="pi pi-search"
                 size="small"
-                class="brand-gradient-bg border-none h-9 px-4 font-semibold rounded-lg shrink-0 shadow-xs"
+                class="h-9 px-4 font-semibold rounded-lg shrink-0 shadow-xs"
                 :loading="studentReportLoading"
                 @click="searchStudentReport()"
               />
@@ -1365,7 +1362,7 @@ onMounted(async () => {
           <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
             <div class="p-3.5 bg-slate-50/90 border-b border-slate-200 text-xs font-bold text-slate-700 flex justify-between items-center">
               <span class="flex items-center gap-2">
-                <i class="pi pi-list text-slate-400"></i> Historical Attendance Ledger ({{ studentReportData.records?.length || 0 }} records)
+                <i class="pi pi-list text-slate-400"></i> Records ({{ studentReportData.records?.length || 0 }} records)
               </span>
               <span class="text-slate-400 font-medium">Sorted chronologically (most recent first)</span>
             </div>
@@ -1503,7 +1500,7 @@ onMounted(async () => {
       v-model:visible="correctionModalVisible"
       modal
       header="Attendance Correction & Audit Log"
-      :style="{ width: '460px' }"
+      :style="{ width: '460px', maxWidth: '95vw' }"
     >
       <form v-if="selectedAttendanceForCorrection" @submit.prevent="handleSubmitCorrection" class="flex flex-col gap-4 pt-2">
         <div class="p-3 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xs">
@@ -1542,7 +1539,6 @@ onMounted(async () => {
             label="Save Correction"
             icon="pi pi-check"
             :loading="correctionSubmitting"
-            class="brand-gradient-bg border-none"
           />
         </div>
       </form>

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/services/api'
+import { formatBDT } from '@/utils/formatters'
 import { useNotification } from '@/composables/useNotification'
-import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
 import FormField from '@/components/common/FormField.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -26,27 +26,8 @@ import type {
 } from '@/types'
 
 const route = useRoute()
+const router = useRouter()
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
-const authStore = useAuthStore()
-
-const isAccountant = computed(() => {
-  if (authStore.isSuperAdmin) return false
-  const roles = authStore.user?.roles ?? []
-  const userType = authStore.user?.user_type
-  if (roles.includes('super_admin') || roles.includes('admin') || userType === 'super_admin' || userType === 'admin') {
-    return false
-  }
-  return roles.includes('accountant') || userType === 'accountant'
-})
-
-const canSeedDemoMatrix = computed(() => {
-  if (isAccountant.value) return false
-  return (
-    authStore.isSuperAdmin ||
-    authStore.hasRole('admin') ||
-    authStore.persona === 'admin'
-  )
-})
 
 // Extended Tabs to match 5-step finance management workflow
 type TabKey = 'structures' | 'categories' | 'assignments' | 'billing' | 'invoices' | 'counter' | 'reports'
@@ -134,6 +115,8 @@ const lastBillingResult = ref<any | null>(null)
 // Tab 5: Invoices & Collections
 const invoices = ref<Invoice[]>([])
 const invoicePagination = ref({ current_page: 1, last_page: 1, total: 0, per_page: 15 })
+/** Totals for ALL invoices matching the current filters (server-side, cancelled excluded). */
+const invoiceSummary = ref<{ total_payable: number; total_paid: number; total_outstanding: number; invoice_count: number } | null>(null)
 const invoiceFilterStatus = ref<string>('')
 const invoiceFilterClass = ref<number | null>(null)
 const invoiceSearch = ref<string>('')
@@ -157,6 +140,42 @@ const lastReceipt = ref<Payment | null>(null)
 const onlineCheckoutVisible = ref(false)
 const onlineGateway = ref<'BKASH' | 'SSLCOMMERZ'>('BKASH')
 const onlineSubmitting = ref(false)
+const onlineAmount = ref<number | null>(null)
+
+/** Idempotency keys: ONE per opened payment form, so double-clicks / retries never double-record. */
+const counterIdempotencyKey = ref('')
+const onlineIdempotencyKey = ref('')
+
+function newIdempotencyKey(prefix: string): string {
+  const rand = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `${prefix}-${rand}`.substring(0, 64)
+}
+
+function apiErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { message?: string; response?: { data?: { message?: string } } } | null
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+function invoiceOutstanding(inv: Invoice | null | undefined): number {
+  if (!inv) return 0
+  const fromApi = (inv as Invoice & { outstanding_balance?: number | string }).outstanding_balance
+  if (fromApi !== undefined && fromApi !== null) return Math.max(0, Number(fromApi))
+  return Math.max(0, Number(inv.total_payable) - Number(inv.total_paid))
+}
+
+/** Contact phone for an invoice's student (student record, linked user, or first guardian). */
+function studentPhone(inv: Invoice | null | undefined): string | null {
+  const st = inv?.student as (NonNullable<Invoice['student']> & { user?: { phone?: string | null } | null; guardians?: Array<{ phone?: string | null }> }) | undefined
+  return st?.emergency_phone || st?.user?.phone || st?.guardians?.[0]?.phone || null
+}
+
+/** Fee head of an assignment (API serialises the relation as fee_head). */
+function assignmentHead(a: StudentFeeAssignment): { name?: string; code?: string } | null {
+  const row = a as StudentFeeAssignment & { fee_head?: { name?: string; code?: string } | null }
+  return row.fee_head ?? (row.feeHead as { name?: string; code?: string } | undefined) ?? null
+}
 
 // Tab 7: Reports & Dues
 const collectionReport = ref<CollectionSummary | null>(null)
@@ -165,9 +184,6 @@ const reconciliations = ref<PaymentReconciliation[]>([])
 const reportStartDate = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().substring(0, 10))
 const reportEndDate = ref(new Date().toISOString().substring(0, 10))
 const reconcileSubmitting = ref(false)
-
-// Demo seeder loader
-const seedingDemo = ref(false)
 
 // Lifecycle
 onMounted(async () => {
@@ -181,13 +197,20 @@ onMounted(async () => {
 })
 
 function checkUrlPaymentStatus() {
-  const status = route.query.payment_status as string
-  const trackingRef = route.query.tracking_ref as string
+  const status = route.query.payment_status
+  if (typeof status !== 'string') return
+  const trackingRef = typeof route.query.tracking_ref === 'string' ? route.query.tracking_ref : ''
   if (status === 'success') {
-    notifySuccess('Payment Successful', `Online checkout confirmed for reference ${trackingRef}`)
-  } else if (status === 'failed') {
-    notifyError('Payment Failed', `Online transaction ${trackingRef} could not be settled.`)
+    notifySuccess('Payment received', `Online payment ${trackingRef} was confirmed.`)
+  } else if (status === 'pending') {
+    notifyWarn('Payment being confirmed', `The gateway is still confirming ${trackingRef}. Do not collect it again.`)
+  } else if (status === 'cancelled') {
+    notifyWarn('Payment cancelled', 'The online payment was cancelled.')
+  } else {
+    notifyError('Payment not completed', `Online payment ${trackingRef} could not be completed.`)
   }
+  const { payment_status: _ps, tracking_ref: _tr, ...rest } = route.query
+  router.replace({ query: rest })
 }
 
 function extractList<T>(res: any): T[] {
@@ -236,37 +259,6 @@ function handleSessionChange() {
     currentSession.value = found
     structureForm.value.academic_year_id = found.id
     fetchStructures()
-  }
-}
-
-// -------------------------------------------------------------
-// Quick Demo Seeder
-// -------------------------------------------------------------
-async function handleSeedDemoMatrix() {
-  if (!canSeedDemoMatrix.value) {
-    notifyWarn('Access Restricted', 'Only administrators can load the demo pricing matrix.')
-    return
-  }
-  try {
-    seedingDemo.value = true
-    const res = await api.post('/api/v1/finance/seed-demo')
-    notifySuccess(
-      'Standard Fee Matrix Configured',
-      `Setup ${res.data?.data?.structures_configured || 35} class pricing rates, assigned transport/hostel services, and generated ${res.data?.data?.invoices_generated || 0} student invoices.`
-    )
-    await Promise.all([
-      fetchMasterData(),
-      fetchStructures(),
-      fetchBillingRuns(),
-      fetchInvoices(),
-    ])
-    if (activeTab.value === 'assignments') {
-      await fetchAssignments()
-    }
-  } catch (err: any) {
-    notifyError('Seed Error', err.response?.data?.message || err.message)
-  } finally {
-    seedingDemo.value = false
   }
 }
 
@@ -533,6 +525,7 @@ async function fetchInvoices(page: number = 1) {
     if (res.data?.meta?.pagination) {
       invoicePagination.value = res.data.meta.pagination
     }
+    invoiceSummary.value = res.data?.meta?.summary ?? null
   } catch (err: any) {
     notifyError('Failed to Load Invoices', err.response?.data?.message || err.message)
   } finally {
@@ -563,37 +556,41 @@ async function handleCancelInvoice(id: number) {
 }
 
 function handleOpenCounterForInvoice(inv: Invoice) {
-  counterTargetInvoice.value = inv
-  const outstanding = Number(inv.total_payable) - Number(inv.total_paid)
-  counterAmount.value = outstanding > 0 ? outstanding : 0
+  selectCounterInvoice(inv)
   activeTab.value = 'counter'
 }
 
 function handleOpenOnlineCheckout(inv: Invoice) {
   selectedInvoice.value = inv
+  onlineAmount.value = invoiceOutstanding(inv)
+  onlineIdempotencyKey.value = newIdempotencyKey('PAY-ONL')
   onlineCheckoutVisible.value = true
 }
 
+const onlineAmountValid = computed(() => {
+  const amt = Number(onlineAmount.value)
+  return !!selectedInvoice.value && amt >= 1 && amt <= invoiceOutstanding(selectedInvoice.value) + 0.001
+})
+
 async function handleInitiateOnlineCheckout() {
-  if (!selectedInvoice.value) return
+  if (!selectedInvoice.value || !onlineAmountValid.value || onlineSubmitting.value) return
+  onlineSubmitting.value = true
   try {
-    onlineSubmitting.value = true
-    const outstanding = Number(selectedInvoice.value.total_payable) - Number(selectedInvoice.value.total_paid)
-    const res = await api.post('/api/v1/finance/online/initiate', {
+    const res = await api.post<{ data: { redirect_url?: string } }>('/api/v1/finance/online/initiate', {
       invoice_id: selectedInvoice.value.id,
       gateway_name: onlineGateway.value,
-      amount: outstanding,
+      amount: Math.round(Number(onlineAmount.value) * 100) / 100,
+      idempotency_key: onlineIdempotencyKey.value,
+      return_path: route.path,
     })
-    const checkoutUrl = res.data?.data?.gateway_url
-    if (checkoutUrl) {
-      window.location.href = checkoutUrl
-    } else {
-      notifySuccess('Payment Initiated', `Redirecting to ${onlineGateway.value} payment sandbox...`)
-      onlineCheckoutVisible.value = false
+    const checkoutUrl = res.data?.data?.redirect_url
+    if (!checkoutUrl) {
+      throw new Error('The payment gateway did not return a checkout page.')
     }
-  } catch (err: any) {
-    notifyError('Gateway Error', err.response?.data?.message || err.message)
-  } finally {
+    // Leaving for the gateway; the invoice list is refreshed when the payer comes back.
+    window.location.href = checkoutUrl
+  } catch (err) {
+    notifyError('Gateway Error', apiErrorMessage(err, 'Could not start the online payment.'))
     onlineSubmitting.value = false
   }
 }
@@ -601,10 +598,7 @@ async function handleInitiateOnlineCheckout() {
 // -------------------------------------------------------------
 // Tab 6: Offline Cashier Counter
 // -------------------------------------------------------------
-const targetInvoiceOutstanding = computed(() => {
-  if (!counterTargetInvoice.value) return 0
-  return Math.max(0, Number(counterTargetInvoice.value.total_payable) - Number(counterTargetInvoice.value.total_paid))
-})
+const targetInvoiceOutstanding = computed(() => invoiceOutstanding(counterTargetInvoice.value))
 
 const canConfirmCounterPayment = computed(() => {
   if (!counterTargetInvoice.value) return false
@@ -619,8 +613,10 @@ const canConfirmCounterPayment = computed(() => {
 function selectCounterInvoice(inv: Invoice) {
   counterTargetInvoice.value = inv
   balanceVerified.value = false
-  const outstanding = Math.max(0, Number(inv.total_payable) - Number(inv.total_paid))
+  const outstanding = invoiceOutstanding(inv)
   counterAmount.value = outstanding > 0 ? Math.round(outstanding * 100) / 100 : 0
+  // New payment form for this invoice: new key (kept across retries of this same form)
+  counterIdempotencyKey.value = newIdempotencyKey('PAY-OFF')
 }
 
 function clearCounterSelection() {
@@ -691,11 +687,16 @@ async function handleCollectPayment() {
     return
   }
 
+  if (counterSubmitting.value) return
+  if (!counterIdempotencyKey.value) {
+    counterIdempotencyKey.value = newIdempotencyKey('PAY-OFF')
+  }
+  const idempotencyKey = counterIdempotencyKey.value
+
   try {
     counterSubmitting.value = true
-    const idempotencyKey = `PAY-OFFLINE-${counterTargetInvoice.value.id}-${counterAmount.value}-${Date.now()}`
     const res = await api.post(
-      '/api/v1/finance/payments/collect',
+      '/api/v1/finance/payments/collect-offline',
       {
         invoice_id: counterTargetInvoice.value.id,
         amount: counterAmount.value,
@@ -719,9 +720,11 @@ async function handleCollectPayment() {
     counterReference.value = ''
     counterInvoiceQuery.value = ''
     counterSearchResults.value = []
+    counterIdempotencyKey.value = ''
     await fetchInvoices()
-  } catch (err: any) {
-    notifyError('Collection Error', err.response?.data?.message || err.message)
+  } catch (err) {
+    // Keep the same key: a retry of this form is the same payment, never a second one.
+    notifyError('Collection Error', apiErrorMessage(err, 'The payment could not be recorded.'))
   } finally {
     counterSubmitting.value = false
   }
@@ -731,31 +734,59 @@ async function handleCollectPayment() {
 // Tab 7: Reports & Reconciliation
 // -------------------------------------------------------------
 async function fetchReports() {
-  try {
-    loading.value = true
-    const [collRes, outRes, reconRes] = await Promise.all([
-      api.get<{ data: CollectionSummary }>('/api/v1/finance/reports/collections', {
-        params: { start_date: reportStartDate.value, end_date: reportEndDate.value },
-      }),
-      api.get<{ data: OutstandingBalancesReport }>('/api/v1/finance/reports/outstanding'),
-      api.get<{ data: PaymentReconciliation[] }>('/api/v1/finance/reconciliations'),
-    ])
-    collectionReport.value = collRes.data?.data || null
-    outstandingReport.value = outRes.data?.data || null
-    reconciliations.value = reconRes.data?.data || []
-  } catch (err: any) {
-    notifyError('Reports Error', err.response?.data?.message || err.message)
-  } finally {
-    loading.value = false
+  loading.value = true
+  const academicYearId = currentSession.value?.id || selectedSessionId.value || undefined
+  // Each report loads independently: one failing report must not blank the whole tab.
+  const [collRes, outRes, reconRes] = await Promise.allSettled([
+    api.get<{ data: CollectionSummary }>('/api/v1/finance/reports/collections', {
+      params: { start_date: reportStartDate.value, end_date: reportEndDate.value },
+    }),
+    academicYearId
+      ? api.get<{ data: OutstandingBalancesReport }>('/api/v1/finance/reports/outstanding', {
+          params: { academic_year_id: academicYearId },
+        })
+      : Promise.reject(new Error('Select an academic session to see outstanding balances.')),
+    api.get<{ data: PaymentReconciliation[] }>('/api/v1/finance/reconciliations'),
+  ])
+
+  const failures: string[] = []
+  if (collRes.status === 'fulfilled') {
+    collectionReport.value = collRes.value.data?.data || null
+  } else {
+    collectionReport.value = null
+    failures.push(`Collections: ${apiErrorMessage(collRes.reason, 'unavailable')}`)
   }
+  if (outRes.status === 'fulfilled') {
+    outstandingReport.value = outRes.value.data?.data || null
+  } else {
+    outstandingReport.value = null
+    failures.push(`Outstanding: ${apiErrorMessage(outRes.reason, 'unavailable')}`)
+  }
+  if (reconRes.status === 'fulfilled') {
+    reconciliations.value = reconRes.value.data?.data || []
+  } else {
+    reconciliations.value = []
+    failures.push(`Reconciliation: ${apiErrorMessage(reconRes.reason, 'unavailable')}`)
+  }
+  if (failures.length > 0) {
+    notifyError('Some reports could not be loaded', failures.join(' | '))
+  }
+  loading.value = false
+}
+
+/** Net (after refunds) collected for a payment method in the collection report. */
+function collectedByMethod(method: string): number {
+  const breakdown = (collectionReport.value?.methods_breakdown ?? {}) as Record<string, { total?: number; net?: number }>
+  const row = breakdown[method]
+  return Number(row?.net ?? row?.total ?? 0)
 }
 
 async function handleRunReconciliation() {
   try {
     reconcileSubmitting.value = true
     await api.post('/api/v1/finance/reconciliations/run', {
-      gateway_name: 'BKASH',
-      reconciliation_date: new Date().toISOString().substring(0, 10),
+      gateway_name: 'ALL',
+      date: new Date().toISOString().substring(0, 10),
     })
     notifySuccess('Reconciliation Complete', 'Automated reconciliation batch finished.')
     await fetchReports()
@@ -778,60 +809,42 @@ const allFeeHeads = computed(() => {
   return heads
 })
 
-// KPI Computations
-const totalInvoicedSum = computed(() => {
-  return invoices.value.reduce((acc, inv) => acc + Number(inv.total_payable || 0), 0)
-})
-const totalCollectedSum = computed(() => {
-  return invoices.value.reduce((acc, inv) => acc + Number(inv.total_paid || 0), 0)
-})
-const totalOutstandingSum = computed(() => {
-  return Math.max(0, totalInvoicedSum.value - totalCollectedSum.value)
-})
-
-function formatCurrency(amount: number | string | null | undefined): string {
-  if (amount === null || amount === undefined) return '৳ 0'
-  return '৳ ' + Number(amount).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-}
+// KPI Computations: server totals for all matching invoices (cancelled excluded). If the server
+// summary is missing, fall back to the current page only and say so.
+const pageInvoices = computed(() => invoices.value.filter((inv) => inv.status !== 'CANCELLED'))
+const kpiScopeLabel = computed(() => (invoiceSummary.value ? 'All invoices in this session (excl. cancelled)' : 'This page only (excl. cancelled)'))
+const totalInvoicedSum = computed(() =>
+  invoiceSummary.value
+    ? Number(invoiceSummary.value.total_payable)
+    : pageInvoices.value.reduce((acc, inv) => acc + Number(inv.total_payable || 0), 0)
+)
+const totalCollectedSum = computed(() =>
+  invoiceSummary.value
+    ? Number(invoiceSummary.value.total_paid)
+    : pageInvoices.value.reduce((acc, inv) => acc + Number(inv.total_paid || 0), 0)
+)
+const totalOutstandingSum = computed(() =>
+  invoiceSummary.value
+    ? Number(invoiceSummary.value.total_outstanding)
+    : pageInvoices.value.reduce((acc, inv) => acc + invoiceOutstanding(inv), 0)
+)
 </script>
 
 <template>
   <div class="fees-management-portal">
     <!-- PAGE HEADER -->
     <PageHeader
-      title="Finance Management & Student Invoicing"
-      subtitle="Configure class fee structures, assign service plans, execute idempotent billing runs, and collect counter & online payments"
-    >
-      <template #actions>
-        <div class="header-action-group">
-          <Button
-            v-if="canSeedDemoMatrix"
-            label="🌱 Load Demo Pricing Matrix"
-            icon="pi pi-database"
-            severity="secondary"
-            outlined
-            size="small"
-            :loading="seedingDemo"
-            @click="handleSeedDemoMatrix"
-          />
-          <Button
-            label="⚡ Run Automated Billing Batch"
-            icon="pi pi-bolt"
-            severity="primary"
-            size="small"
-            @click="generateModalVisible = true"
-          />
-        </div>
-      </template>
-    </PageHeader>
+      title="Fees & Invoices"
+      subtitle="Fee structures, billing, invoices and payment collection."
+    />
 
     <!-- EXECUTIVE KPI STATS CARDS -->
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-content">
           <span class="stat-label">Total Invoiced</span>
-          <h3 class="stat-value text-blue">{{ formatCurrency(totalInvoicedSum) }}</h3>
-          <span class="stat-sub">Active Session Invoices</span>
+          <h3 class="stat-value text-blue">{{ formatBDT(totalInvoicedSum) }}</h3>
+          <span class="stat-sub">{{ kpiScopeLabel }}</span>
         </div>
         <div class="stat-icon-wrapper bg-blue-light">
           <i class="pi pi-file-o text-blue"></i>
@@ -841,8 +854,8 @@ function formatCurrency(amount: number | string | null | undefined): string {
       <div class="stat-card">
         <div class="stat-content">
           <span class="stat-label">Total Collected</span>
-          <h3 class="stat-value text-emerald">{{ formatCurrency(totalCollectedSum) }}</h3>
-          <span class="stat-sub">Settled Offline & Gateway</span>
+          <h3 class="stat-value text-emerald">{{ formatBDT(totalCollectedSum) }}</h3>
+          <span class="stat-sub">{{ kpiScopeLabel }}</span>
         </div>
         <div class="stat-icon-wrapper bg-emerald-light">
           <i class="pi pi-check-circle text-emerald"></i>
@@ -852,8 +865,8 @@ function formatCurrency(amount: number | string | null | undefined): string {
       <div class="stat-card">
         <div class="stat-content">
           <span class="stat-label">Outstanding Dues</span>
-          <h3 class="stat-value text-amber">{{ formatCurrency(totalOutstandingSum) }}</h3>
-          <span class="stat-sub">Pending & Partial Bills</span>
+          <h3 class="stat-value text-amber">{{ formatBDT(totalOutstandingSum) }}</h3>
+          <span class="stat-sub">{{ kpiScopeLabel }}</span>
         </div>
         <div class="stat-icon-wrapper bg-amber-light">
           <i class="pi pi-clock text-amber"></i>
@@ -862,9 +875,9 @@ function formatCurrency(amount: number | string | null | undefined): string {
 
       <div class="stat-card">
         <div class="stat-content">
-          <span class="stat-label">Automated Batches</span>
-          <h3 class="stat-value text-indigo">{{ billingRuns.length }} Runs</h3>
-          <span class="stat-sub">Idempotent Billing History</span>
+          <span class="stat-label">Billing Runs</span>
+          <h3 class="stat-value text-indigo">{{ billingRuns.length }}</h3>
+          <span class="stat-sub">Recent billing batches</span>
         </div>
         <div class="stat-icon-wrapper bg-indigo-light">
           <i class="pi pi-sync text-indigo"></i>
@@ -961,11 +974,11 @@ function formatCurrency(amount: number | string | null | undefined): string {
             @change="handleSessionChange"
           >
             <option v-for="y in academicYears" :key="y.id" :value="y.id">
-              {{ y.name }} {{ y.is_current ? ' ★ (Active)' : '' }}
+              {{ y.name }} {{ y.is_current ? ' (current)' : '' }}
             </option>
           </select>
           <Button
-            label="➕ Configure Structure Price"
+            label="Set Fee Amount"
             icon="pi pi-plus"
             size="small"
             severity="primary"
@@ -1030,12 +1043,13 @@ function formatCurrency(amount: number | string | null | undefined): string {
                 @click="openEditStructureModal(row.headId, c.id)"
               >
                 <span v-if="row.classRates[c.id] !== undefined">
-                  {{ formatCurrency(row.classRates[c.id]) }}
+                  {{ formatBDT(row.classRates[c.id]) }}
                 </span>
                 <span v-else class="text-placeholder">—</span>
               </td>
               <td class="text-center">
                 <Button
+                  aria-label="Edit fee amounts"
                   icon="pi pi-pencil"
                   text
                   rounded
@@ -1048,8 +1062,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
             <tr v-if="structureMatrix.length === 0">
               <td :colspan="4 + classes.length" class="empty-state-cell">
                 <i class="pi pi-info-circle empty-icon"></i>
-                <p v-if="canSeedDemoMatrix">No fee structures configured for this academic session. Click "Load Demo Pricing Matrix" above to populate!</p>
-                <p v-else>No fee structures configured for this academic session. Please configure fee categories and class structures.</p>
+                <p>No fee structures are set up for this session yet. Add fee categories and heads, then set class amounts.</p>
               </td>
             </tr>
           </tbody>
@@ -1070,7 +1083,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </div>
         <div class="action-wrap">
           <Button
-            label="➕ New Category"
+            label="New Category"
             icon="pi pi-folder-plus"
             size="small"
             severity="secondary"
@@ -1078,7 +1091,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
             @click="categoryModalVisible = true"
           />
           <Button
-            label="➕ New Fee Head"
+            label="New Fee Head"
             icon="pi pi-plus"
             size="small"
             severity="primary"
@@ -1136,7 +1149,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </div>
         <div class="action-wrap">
           <Button
-            label="⚡ Bulk Assign Service/Fee Plan"
+            label="Bulk Assign Fee"
             icon="pi pi-bolt"
             size="small"
             severity="primary"
@@ -1215,19 +1228,19 @@ function formatCurrency(amount: number | string | null | undefined): string {
               <td>
                 <div class="flex-center-gap">
                   <i
-                    v-if="a.fee_head?.code === 'TRANSPORT_FEE'"
+                    v-if="assignmentHead(a)?.code === 'TRANSPORT_FEE'"
                     class="pi pi-car text-amber"
                   ></i>
                   <i
-                    v-else-if="a.fee_head?.code === 'HOSTEL_FEE'"
+                    v-else-if="assignmentHead(a)?.code === 'HOSTEL_FEE'"
                     class="pi pi-home text-indigo"
                   ></i>
-                  <span class="font-bold text-dark">{{ a.fee_head?.name || 'Fee Head' }}</span>
+                  <span class="font-bold text-dark">{{ assignmentHead(a)?.name || 'Fee Head' }}</span>
                 </div>
-                <span class="code-subtext">{{ a.fee_head?.code }}</span>
+                <span class="code-subtext">{{ assignmentHead(a)?.code }}</span>
               </td>
               <td class="font-mono font-bold text-dark">
-                <span v-if="a.custom_amount">{{ formatCurrency(a.custom_amount) }} <small class="text-muted font-normal">(custom)</small></span>
+                <span v-if="a.custom_amount">{{ formatBDT(a.custom_amount) }} <small class="text-muted font-normal">(custom)</small></span>
                 <span v-else class="text-muted font-normal text-xs">Standard Class Rate</span>
               </td>
               <td class="text-muted text-xs">
@@ -1242,6 +1255,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
               </td>
               <td class="text-center">
                 <Button
+                  aria-label="Remove assignment"
                   icon="pi pi-trash"
                   severity="danger"
                   text
@@ -1265,6 +1279,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
           <span>Showing page {{ assignmentPagination.current_page }} of {{ assignmentPagination.last_page }} ({{ assignmentPagination.total }} records)</span>
           <div class="pagination-buttons">
             <Button
+              aria-label="Previous page"
               icon="pi pi-chevron-left"
               text
               size="small"
@@ -1272,6 +1287,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
               @click="fetchAssignments(assignmentPagination.current_page - 1)"
             />
             <Button
+              aria-label="Next page"
               icon="pi pi-chevron-right"
               text
               size="small"
@@ -1301,7 +1317,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
             </p>
           </div>
           <Button
-            label="⚡ Run Billing Batch Now"
+            label="Run Billing"
             icon="pi pi-bolt"
             severity="success"
             size="small"
@@ -1351,6 +1367,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         <div class="table-inner-header">
           <h3 class="table-inner-title">Automated Billing Execution Log</h3>
           <Button
+            aria-label="Refresh billing runs"
             icon="pi pi-refresh"
             text
             size="small"
@@ -1402,7 +1419,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                 {{ run.total_invoices_skipped }}
               </td>
               <td class="text-right font-mono font-bold text-dark text-xs">
-                {{ formatCurrency(run.total_amount_billed) }}
+                {{ formatBDT(run.total_amount_billed) }}
               </td>
               <td class="text-right font-mono text-muted text-xs">
                 {{ run.duration_ms }} ms
@@ -1512,13 +1529,13 @@ function formatCurrency(amount: number | string | null | undefined): string {
                 {{ inv.month ? new Date(0, inv.month - 1).toLocaleString('en', { month: 'short' }) : 'Session' }} {{ inv.year }}
               </td>
               <td class="text-right font-mono font-bold text-dark text-xs">
-                {{ formatCurrency(inv.total_payable) }}
+                {{ formatBDT(inv.total_payable) }}
               </td>
               <td class="text-right font-mono text-emerald text-xs">
-                {{ formatCurrency(inv.total_paid) }}
+                {{ formatBDT(inv.total_paid) }}
               </td>
               <td class="text-right font-mono font-bold text-xs" :class="Number(inv.total_payable) - Number(inv.total_paid) > 0 ? 'text-amber' : 'text-muted'">
-                {{ formatCurrency(Number(inv.total_payable) - Number(inv.total_paid)) }}
+                {{ formatBDT(Number(inv.total_payable) - Number(inv.total_paid)) }}
               </td>
               <td class="text-center">
                 <StatusBadge :status="inv.status" />
@@ -1526,6 +1543,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
               <td class="text-center">
                 <div class="table-actions-cell">
                   <Button
+                    aria-label="View invoice"
                     icon="pi pi-eye"
                     text
                     rounded
@@ -1535,6 +1553,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                     @click="handleViewInvoice(inv.id)"
                   />
                   <Button
+                    aria-label="Collect at counter"
                     v-if="inv.status !== 'PAID' && inv.status !== 'CANCELLED'"
                     icon="pi pi-credit-card"
                     text
@@ -1545,6 +1564,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                     @click="handleOpenCounterForInvoice(inv)"
                   />
                   <Button
+                    aria-label="Pay online"
                     v-if="inv.status !== 'PAID' && inv.status !== 'CANCELLED'"
                     icon="pi pi-mobile"
                     text
@@ -1570,6 +1590,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
           <span>Showing page {{ invoicePagination.current_page }} of {{ invoicePagination.last_page }} ({{ invoicePagination.total }} invoices)</span>
           <div class="pagination-buttons">
             <Button
+              aria-label="Previous page"
               icon="pi pi-chevron-left"
               text
               size="small"
@@ -1577,6 +1598,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
               @click="fetchInvoices(invoicePagination.current_page - 1)"
             />
             <Button
+              aria-label="Next page"
               icon="pi pi-chevron-right"
               text
               size="small"
@@ -1687,8 +1709,8 @@ function formatCurrency(amount: number | string | null | undefined): string {
                     • Class {{ inv.student?.currentEnrollment?.classLevel?.name || inv.student?.current_enrollment?.class_level?.name }}
                   </span>
                 </span>
-                <span v-if="inv.student?.emergency_phone || inv.student?.user?.phone || inv.student?.guardians?.[0]?.phone" class="phone-meta text-xs text-slate-500">
-                  <i class="pi pi-phone"></i> {{ inv.student?.emergency_phone || inv.student?.user?.phone || inv.student?.guardians?.[0]?.phone }}
+                <span v-if="studentPhone(inv)" class="phone-meta text-xs text-slate-500">
+                  <i class="pi pi-phone" aria-hidden="true"></i> {{ studentPhone(inv) }}
                 </span>
               </div>
 
@@ -1696,7 +1718,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                 <div class="financial-due-pill">
                   <span class="due-label">Due:</span>
                   <strong class="due-amount" :class="Number(inv.total_payable) - Number(inv.total_paid) > 0 ? 'text-amber' : 'text-emerald'">
-                    {{ formatCurrency(Math.max(0, Number(inv.total_payable) - Number(inv.total_paid))) }}
+                    {{ formatBDT(Math.max(0, Number(inv.total_payable) - Number(inv.total_paid))) }}
                   </strong>
                 </div>
                 <Button
@@ -1742,8 +1764,8 @@ function formatCurrency(amount: number | string | null | undefined): string {
                 <span v-if="counterTargetInvoice.student?.currentEnrollment?.classLevel?.name || counterTargetInvoice.student?.current_enrollment?.class_level?.name" class="class-badge-pill">
                   Class: {{ counterTargetInvoice.student?.currentEnrollment?.classLevel?.name || counterTargetInvoice.student?.current_enrollment?.class_level?.name }}
                 </span>
-                <span v-if="counterTargetInvoice.student?.emergency_phone || counterTargetInvoice.student?.user?.phone || counterTargetInvoice.student?.guardians?.[0]?.phone" class="phone-badge-pill">
-                  📞 {{ counterTargetInvoice.student?.emergency_phone || counterTargetInvoice.student?.user?.phone || counterTargetInvoice.student?.guardians?.[0]?.phone }}
+                <span v-if="studentPhone(counterTargetInvoice)" class="phone-badge-pill">
+                  Phone: {{ studentPhone(counterTargetInvoice) }}
                 </span>
               </div>
             </div>
@@ -1764,16 +1786,16 @@ function formatCurrency(amount: number | string | null | undefined): string {
           <div class="stat-mini-grid">
             <div class="stat-cell">
               <span class="meta-label">Total Invoiced</span>
-              <span class="meta-val font-semibold">{{ formatCurrency(counterTargetInvoice.total_payable) }}</span>
+              <span class="meta-val font-semibold">{{ formatBDT(counterTargetInvoice.total_payable) }}</span>
             </div>
             <div class="stat-cell">
               <span class="meta-label">Paid So Far</span>
-              <span class="meta-val text-emerald font-semibold">{{ formatCurrency(counterTargetInvoice.total_paid) }}</span>
+              <span class="meta-val text-emerald font-semibold">{{ formatBDT(counterTargetInvoice.total_paid) }}</span>
             </div>
             <div class="stat-cell balance-highlight-cell">
               <span class="meta-label">Outstanding Balance</span>
               <span class="meta-val text-amber font-bold text-base">
-                {{ formatCurrency(targetInvoiceOutstanding) }}
+                {{ formatBDT(targetInvoiceOutstanding) }}
               </span>
             </div>
           </div>
@@ -1817,29 +1839,28 @@ function formatCurrency(amount: number | string | null | undefined): string {
                 I have verified student
                 <strong>{{ counterTargetInvoice.student?.first_name }} {{ counterTargetInvoice.student?.last_name }}</strong>
                 (ID: <code>{{ counterTargetInvoice.student?.student_uid }}</code>) and confirmed the outstanding balance of
-                <strong class="text-amber">{{ formatCurrency(targetInvoiceOutstanding) }}</strong> with payer.
+                <strong class="text-amber">{{ formatBDT(targetInvoiceOutstanding) }}</strong> with payer.
               </span>
             </label>
           </div>
 
           <!-- COLLECTION PAYMENT FORM -->
           <div v-if="targetInvoiceOutstanding > 0" class="counter-form-stack" :class="{ 'form-dimmed': !balanceVerified }">
-            <FormField label="Collection Amount (BDT)">
+            <FormField label="Amount (৳)">
               <div class="amount-field-container">
-                <InputText
+                <input
                   v-model.number="counterAmount"
                   type="number"
                   step="0.01"
-                  class="full-width font-mono text-emerald font-bold"
-                  :disabled="!balanceVerified"
-                />
+                  class="p-inputtext p-component full-width font-mono text-emerald font-bold"
+                  :disabled="!balanceVerified" />
                 <div v-if="balanceVerified" class="quick-preset-chips">
                   <button
                     type="button"
                     class="preset-amount-chip"
                     @click="counterAmount = targetInvoiceOutstanding"
                   >
-                    Pay Full ({{ formatCurrency(targetInvoiceOutstanding) }})
+                    Pay Full ({{ formatBDT(targetInvoiceOutstanding) }})
                   </button>
                   <button
                     v-if="targetInvoiceOutstanding > 500"
@@ -1847,7 +1868,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                     class="preset-amount-chip"
                     @click="counterAmount = Math.round(targetInvoiceOutstanding / 2)"
                   >
-                    Pay 50% ({{ formatCurrency(Math.round(targetInvoiceOutstanding / 2)) }})
+                    Pay 50% ({{ formatBDT(Math.round(targetInvoiceOutstanding / 2)) }})
                   </button>
                 </div>
               </div>
@@ -1855,11 +1876,11 @@ function formatCurrency(amount: number | string | null | undefined): string {
               <!-- Overpayment or invalid amount validation feedback -->
               <small v-if="counterAmount && counterAmount > targetInvoiceOutstanding" class="amount-error text-danger">
                 <i class="pi pi-exclamation-triangle"></i>
-                Overpayment prevented: Amount cannot exceed remaining balance of {{ formatCurrency(targetInvoiceOutstanding) }}.
+                Overpayment prevented: Amount cannot exceed remaining balance of {{ formatBDT(targetInvoiceOutstanding) }}.
               </small>
               <small v-else-if="counterAmount && counterAmount > 0" class="amount-helper text-emerald">
                 <i class="pi pi-info-circle"></i>
-                Remaining balance after this payment: {{ formatCurrency(Math.max(0, targetInvoiceOutstanding - counterAmount)) }}
+                Remaining balance after this payment: {{ formatBDT(Math.max(0, targetInvoiceOutstanding - counterAmount)) }}
               </small>
             </FormField>
 
@@ -1941,7 +1962,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </div>
         <div class="action-wrap">
           <Button
-            label="🔄 Run Gateway Reconciliation"
+            label="Run Reconciliation"
             icon="pi pi-sync"
             size="small"
             severity="secondary"
@@ -1962,15 +1983,15 @@ function formatCurrency(amount: number | string | null | undefined): string {
           <div class="breakdown-list">
             <div class="breakdown-item">
               <span class="flex-center-gap"><i class="pi pi-wallet text-emerald"></i> Cash Counter</span>
-              <span class="font-mono font-bold text-dark">{{ formatCurrency(collectionReport?.by_payment_method?.CASH_COUNTER || 25000) }}</span>
+              <span class="font-mono font-bold text-dark">{{ formatBDT(collectedByMethod('CASH_COUNTER')) }}</span>
             </div>
             <div class="breakdown-item">
               <span class="flex-center-gap"><i class="pi pi-mobile text-pink"></i> bKash Tokenized</span>
-              <span class="font-mono font-bold text-dark">{{ formatCurrency(collectionReport?.by_payment_method?.BKASH_TOKENIZED || 42500) }}</span>
+              <span class="font-mono font-bold text-dark">{{ formatBDT(collectedByMethod('BKASH_TOKENIZED')) }}</span>
             </div>
             <div class="breakdown-item">
               <span class="flex-center-gap"><i class="pi pi-credit-card text-indigo"></i> SSLCOMMERZ</span>
-              <span class="font-mono font-bold text-dark">{{ formatCurrency(collectionReport?.by_payment_method?.SSLCOMMERZ || 35000) }}</span>
+              <span class="font-mono font-bold text-dark">{{ formatBDT(collectedByMethod('SSLCOMMERZ')) }}</span>
             </div>
           </div>
         </div>
@@ -2010,13 +2031,13 @@ function formatCurrency(amount: number | string | null | undefined): string {
     <!-- ========================================================= -->
 
     <!-- MODAL: CONFIGURE STRUCTURE PRICE -->
-    <Dialog v-model:visible="structureModalVisible" header="Configure Class Fee Structure Rate" modal :style="{ width: '520px' }">
+    <Dialog v-model:visible="structureModalVisible" header="Configure Class Fee Structure Rate" modal :style="{ width: '520px', maxWidth: '95vw' }">
       <div class="modal-body-stack">
         <FormField label="Academic Session">
           <select v-model.number="structureForm.academic_year_id" class="full-width select-input font-bold">
             <option :value="0" disabled>Select Academic Session</option>
             <option v-for="y in academicYears" :key="y.id" :value="y.id">
-              {{ y.name }} {{ y.is_current ? ' ★ (Current)' : '' }}
+              {{ y.name }} {{ y.is_current ? ' (current)' : '' }}
             </option>
           </select>
         </FormField>
@@ -2047,8 +2068,8 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </FormField>
 
         <div class="form-grid-2">
-          <FormField label="Amount (BDT)">
-            <InputText v-model.number="structureForm.amount" type="number" class="full-width font-mono font-bold" />
+          <FormField label="Amount (৳)">
+            <input v-model.number="structureForm.amount" type="number" class="p-inputtext p-component full-width font-mono font-bold" />
           </FormField>
 
           <FormField label="Billing Frequency">
@@ -2062,7 +2083,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </div>
 
         <FormField label="Due Day of Month">
-          <InputText v-model.number="structureForm.due_day_of_month" type="number" min="1" max="31" class="full-width font-mono" />
+          <input v-model.number="structureForm.due_day_of_month" type="number" min="1" max="31" class="p-inputtext p-component full-width font-mono" />
         </FormField>
 
         <div class="modal-footer-row">
@@ -2073,7 +2094,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
     </Dialog>
 
     <!-- MODAL: ADD FEE CATEGORY -->
-    <Dialog v-model:visible="categoryModalVisible" header="Add New Fee Category" modal :style="{ width: '450px' }">
+    <Dialog v-model:visible="categoryModalVisible" header="Add New Fee Category" modal :style="{ width: '450px', maxWidth: '95vw' }">
       <div class="modal-body-stack">
         <FormField label="Category Name">
           <InputText v-model="categoryForm.name" placeholder="e.g. Laboratory & ICT, Co-Curricular" class="full-width" />
@@ -2086,7 +2107,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
     </Dialog>
 
     <!-- MODAL: ADD FEE HEAD -->
-    <Dialog v-model:visible="headModalVisible" header="Add New Fee Head Line Item" modal :style="{ width: '480px' }">
+    <Dialog v-model:visible="headModalVisible" header="Add New Fee Head Line Item" modal :style="{ width: '480px', maxWidth: '95vw' }">
       <div class="modal-body-stack">
         <FormField label="Fee Category">
           <select v-model.number="headForm.fee_category_id" class="full-width select-input">
@@ -2108,7 +2129,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
     </Dialog>
 
     <!-- MODAL: RUN AUTOMATED BILLING BATCH -->
-    <Dialog v-model:visible="generateModalVisible" header="Launch Automated Student Billing Batch" modal :style="{ width: '560px' }">
+    <Dialog v-model:visible="generateModalVisible" header="Launch Automated Student Billing Batch" modal :style="{ width: '560px', maxWidth: '95vw' }">
       <div class="modal-body-stack">
         <p class="text-xs text-muted">
           The billing engine evaluates enrolled students in the target class/session and generates itemized bills according to configured structures and opted-in services.
@@ -2118,7 +2139,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
           <select v-model.number="generateForm.academic_year_id" class="full-width select-input font-bold">
             <option :value="0" disabled>Select Academic Session</option>
             <option v-for="y in academicYears" :key="y.id" :value="y.id">
-              {{ y.name }} {{ y.is_current ? ' ★ (Current)' : '' }}
+              {{ y.name }} {{ y.is_current ? ' (current)' : '' }}
             </option>
           </select>
         </FormField>
@@ -2133,7 +2154,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
           </FormField>
 
           <FormField label="Billing Year">
-            <InputText v-model.number="generateForm.year" type="number" class="full-width font-mono" />
+            <input v-model.number="generateForm.year" type="number" class="p-inputtext p-component full-width font-mono" />
           </FormField>
         </div>
 
@@ -2178,7 +2199,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
     </Dialog>
 
     <!-- MODAL: BULK ASSIGN FEE PLAN -->
-    <Dialog v-model:visible="bulkAssignModalVisible" header="Bulk Assign Fee Plan / Service to Class" modal :style="{ width: '500px' }">
+    <Dialog v-model:visible="bulkAssignModalVisible" header="Bulk Assign Fee Plan / Service to Class" modal :style="{ width: '500px', maxWidth: '95vw' }">
       <div class="modal-body-stack">
         <FormField label="Target Class">
           <select v-model="bulkAssignForm.class_id" class="full-width select-input font-bold">
@@ -2206,7 +2227,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </FormField>
 
         <FormField label="Custom Fixed Amount (Leave empty for standard class rate)">
-          <InputText v-model.number="bulkAssignForm.custom_amount" type="number" placeholder="Optional custom amount..." class="full-width font-mono" />
+          <input v-model.number="bulkAssignForm.custom_amount" type="number" placeholder="Optional custom amount..." class="p-inputtext p-component full-width font-mono" />
         </FormField>
 
         <FormField label="Notes / Reason">
@@ -2227,7 +2248,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
     </Dialog>
 
     <!-- MODAL: VIEW INVOICE PARTICULARS -->
-    <Dialog v-model:visible="invoiceDetailVisible" header="Invoice Particulars & Breakdown" modal :style="{ width: '640px' }">
+    <Dialog v-model:visible="invoiceDetailVisible" header="Invoice Particulars & Breakdown" modal :style="{ width: '640px', maxWidth: '95vw' }">
       <div v-if="selectedInvoice" class="modal-body-stack">
         <div class="invoice-summary-banner">
           <div>
@@ -2251,19 +2272,19 @@ function formatCurrency(amount: number | string | null | undefined): string {
           <tbody class="font-mono">
             <tr v-for="item in selectedInvoice.items" :key="item.id">
               <td class="font-sans text-dark">{{ item.description }}</td>
-              <td class="text-right">{{ formatCurrency(item.amount) }}</td>
-              <td class="text-right text-emerald">{{ formatCurrency(item.discount) }}</td>
-              <td class="text-right font-bold text-dark">{{ formatCurrency(item.net_amount) }}</td>
+              <td class="text-right">{{ formatBDT(item.amount) }}</td>
+              <td class="text-right text-emerald">{{ formatBDT(item.discount) }}</td>
+              <td class="text-right font-bold text-dark">{{ formatBDT(item.net_amount) }}</td>
             </tr>
           </tbody>
           <tfoot class="modal-table-foot font-mono font-bold">
             <tr>
               <td colspan="3" class="text-right text-muted">Total Payable:</td>
-              <td class="text-right font-bold text-dark">{{ formatCurrency(selectedInvoice.total_payable) }}</td>
+              <td class="text-right font-bold text-dark">{{ formatBDT(selectedInvoice.total_payable) }}</td>
             </tr>
             <tr>
               <td colspan="3" class="text-right text-emerald">Total Settled:</td>
-              <td class="text-right text-emerald">{{ formatCurrency(selectedInvoice.total_paid) }}</td>
+              <td class="text-right text-emerald">{{ formatBDT(selectedInvoice.total_paid) }}</td>
             </tr>
           </tfoot>
         </table>
@@ -2283,18 +2304,29 @@ function formatCurrency(amount: number | string | null | undefined): string {
       </div>
     </Dialog>
 
-    <!-- MODAL: ONLINE CHECKOUT DEMO -->
-    <Dialog v-model:visible="onlineCheckoutVisible" header="Integrated Online Payment Gateway" modal :style="{ width: '480px' }">
+    <!-- MODAL: ONLINE CHECKOUT -->
+    <Dialog v-model:visible="onlineCheckoutVisible" header="Online Payment" modal :style="{ width: '480px', maxWidth: '95vw' }">
       <div v-if="selectedInvoice" class="modal-body-stack">
         <div class="gateway-bill-card">
           <span class="gateway-bill-label">Bill Summary</span>
           <div class="flex-between">
             <span class="font-bold text-dark font-mono">{{ selectedInvoice.invoice_number }}</span>
             <span class="gateway-bill-amount">
-              {{ formatCurrency(Number(selectedInvoice.total_payable) - Number(selectedInvoice.total_paid)) }}
+              {{ formatBDT(invoiceOutstanding(selectedInvoice)) }}
             </span>
           </div>
         </div>
+
+        <FormField label="Amount (৳)" helpText="Full balance or a part of it.">
+          <input
+            v-model.number="onlineAmount"
+            type="number"
+            min="1"
+            step="0.01"
+            :max="invoiceOutstanding(selectedInvoice)"
+            class="p-inputtext p-component full-width font-mono font-bold"
+          />
+        </FormField>
 
         <FormField label="Choose Payment Provider">
           <div class="gateway-options-grid">
@@ -2304,7 +2336,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
             >
               <input v-model="onlineGateway" type="radio" value="BKASH" class="hidden-radio" />
               <i class="pi pi-mobile text-pink"></i>
-              <span class="gateway-title">bKash Tokenized</span>
+              <span class="gateway-title">bKash</span>
             </label>
             <label
               class="gateway-card"
@@ -2318,14 +2350,15 @@ function formatCurrency(amount: number | string | null | undefined): string {
         </FormField>
 
         <p class="text-xs text-muted">
-          Durable payment attempt will be recorded before redirecting to {{ onlineGateway }} sandbox.
+          The payer will be taken to the {{ onlineGateway === 'BKASH' ? 'bKash' : 'SSLCommerz' }} payment page. The invoice updates once the provider confirms payment.
         </p>
 
         <div class="modal-footer-row">
           <Button label="Cancel" severity="secondary" text @click="onlineCheckoutVisible = false" />
           <Button
-            label="Proceed to Gateway"
+            label="Continue to Payment"
             icon="pi pi-external-link"
+            :disabled="!onlineAmountValid"
             :loading="onlineSubmitting"
             @click="handleInitiateOnlineCheckout"
           />
@@ -2334,7 +2367,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
     </Dialog>
 
     <!-- MODAL: MONEY RECEIPT DISPLAY -->
-    <Dialog v-model:visible="receiptModalVisible" header="Official Money Receipt Issued" modal :style="{ width: '480px' }">
+    <Dialog v-model:visible="receiptModalVisible" header="Official Money Receipt Issued" modal :style="{ width: '480px', maxWidth: '95vw' }">
       <div v-if="lastReceipt" class="receipt-dialog-body">
         <div class="receipt-success-icon">
           <i class="pi pi-check"></i>
@@ -2346,7 +2379,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
         <div class="receipt-summary-box">
           <div class="receipt-summary-row">
             <span class="text-muted">Amount Paid:</span>
-            <span class="font-bold text-dark font-mono">{{ formatCurrency(lastReceipt.amount) }}</span>
+            <span class="font-bold text-dark font-mono">{{ formatBDT(lastReceipt.amount) }}</span>
           </div>
           <div class="receipt-summary-row">
             <span class="text-muted">Method:</span>

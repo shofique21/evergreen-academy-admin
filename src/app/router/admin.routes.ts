@@ -82,8 +82,7 @@ export const adminRoutes: RouteRecordRaw[] = [
       {
         path: 'notifications',
         name: 'admin-notifications',
-        component: () => import('@/modules/notifications/NotificationsView.vue'),
-        meta: { title: 'Notification Alerts — Evergreen Academy' },
+        redirect: { name: 'admin-notices', query: { tab: 'inbox' } },
       },
       {
         path: 'reports',

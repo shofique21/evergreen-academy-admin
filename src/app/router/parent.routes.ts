@@ -50,8 +50,7 @@ export const parentRoutes: RouteRecordRaw[] = [
       {
         path: 'notifications',
         name: 'parent-notifications',
-        component: () => import('@/modules/notifications/NotificationsView.vue'),
-        meta: { title: 'Parent Notifications — Evergreen Academy' },
+        redirect: { name: 'parent-notices', query: { tab: 'inbox' } },
       },
     ],
   },

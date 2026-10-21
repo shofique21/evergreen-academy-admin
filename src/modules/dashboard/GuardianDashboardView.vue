@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
-import InputText from 'primevue/inputtext'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatBDT } from '@/utils/formatters'
-import { PageHeader, LoadingState, ErrorState } from '@/components/common'
-import { StatusBadge } from '@/components/notifications'
+import { PageHeader, LoadingState, ErrorState, StatusBadge } from '@/components/common'
 import { AppButton } from '@/components/forms'
 
 const router = useRouter()
+const route = useRoute()
 const toast = useToast()
 const authStore = useAuthStore()
 
@@ -34,7 +33,7 @@ interface ChildProfile {
 }
 
 interface AttendanceInfo {
-  percentage: number
+  percentage: number | null
   total_sessions: number
   present_count: number
   late_count: number
@@ -44,15 +43,15 @@ interface AttendanceInfo {
   has_alert: boolean
   alert_severity: 'warn' | 'success' | 'info' | 'danger'
   alert_message: string | null
-  streak_days: number
-  status_label: 'EXCELLENT' | 'REGULAR' | 'CRITICAL'
+  streak_days: number | null
+  status_label: 'EXCELLENT' | 'REGULAR' | 'CRITICAL' | 'NO_DATA'
 }
 
 interface AcademicInfo {
-  latest_gpa: number
-  latest_grade: string
-  class_rank: number
-  section_rank: number
+  latest_gpa: number | null
+  latest_grade: string | null
+  class_rank: number | null
+  section_rank: number | null
   published_result: {
     exam_name: string
     term_name: string
@@ -62,13 +61,18 @@ interface AcademicInfo {
     class_rank: number
     section_rank: number
     is_passed: boolean
+    // Sample shape (subject/marks/grade/gpa) or published snapshot shape (subject_name/total_obtained/letter_grade/grade_point)
     marks_breakdown: Array<{
-      subject: string
-      marks: number
-      grade: string
-      gpa: number
+      subject?: string
+      marks?: number
+      grade?: string
+      gpa?: number
+      subject_name?: string
+      total_obtained?: number
+      letter_grade?: string
+      grade_point?: number
     }>
-    teacher_remarks: string
+    teacher_remarks: string | null
   } | null
   upcoming_examinations: Array<{
     id: number
@@ -148,8 +152,8 @@ interface GuardianOverviewData {
     guardian_id: number | null
     name: string
     email: string
-    phone: string
-    occupation: string
+    phone: string | null
+    occupation: string | null
     summary_date: string
   }
   children: ChildProfile[]
@@ -161,7 +165,7 @@ interface GuardianOverviewData {
   family_summary: {
     total_children: number
     total_family_dues: number
-    combined_attendance_average: number
+    combined_attendance_average: number | null
     all_fees_cleared: boolean
   }
 }
@@ -172,232 +176,61 @@ const dashboardData = ref<GuardianOverviewData | null>(null)
 const selectedChildId = ref<number | null>(null)
 const activeFinanceTab = ref<'dues' | 'receipts'>('dues')
 
-// Fallback initial dataset for development & offline resiliency
-const fallbackData: GuardianOverviewData = {
+// Empty shell used only while loading / on error, so the header can render. Never sample data.
+const emptyData: GuardianOverviewData = {
   guardian_profile: {
-    guardian_id: 1,
-    name: 'Tariqul Islam',
-    email: 'tariqul@evergreen.edu.bd',
-    phone: '+8801719887766',
-    occupation: 'Senior Civil Engineer',
-    summary_date: '2026-10-16',
+    guardian_id: null,
+    name: '',
+    email: '',
+    phone: null,
+    occupation: null,
+    summary_date: new Date().toISOString().substring(0, 10),
   },
-  children: [
-    {
-      student_id: 101,
-      student_uid: 'STU-2026-0891',
-      first_name: 'Sadman',
-      last_name: 'Islam',
-      full_name: 'Sadman Islam',
-      class_id: 10,
-      class_name: 'Class 10 (Science)',
-      section_id: 1,
-      section_name: 'Section A',
-      roll_number: 'Roll: 05',
-      campus_id: 1,
-      campus_name: 'Dhanmondi Main Campus',
-      relationship: 'Father',
-      is_primary: true,
-      photo: null,
-    },
-    {
-      student_id: 102,
-      student_uid: 'STU-2026-0892',
-      first_name: 'Maliha',
-      last_name: 'Islam',
-      full_name: 'Maliha Islam',
-      class_id: 7,
-      class_name: 'Class 7 (Bangla Medium)',
-      section_id: 2,
-      section_name: 'Section B',
-      roll_number: 'Roll: 12',
-      campus_id: 1,
-      campus_name: 'Dhanmondi Main Campus',
-      relationship: 'Father',
-      is_primary: true,
-      photo: null,
-    },
-  ],
-  selected_child: {
-    student_id: 101,
-    student_uid: 'STU-2026-0891',
-    first_name: 'Sadman',
-    last_name: 'Islam',
-    full_name: 'Sadman Islam',
-    class_id: 10,
-    class_name: 'Class 10 (Science)',
-    section_id: 1,
-    section_name: 'Section A',
-    roll_number: 'Roll: 05',
-    campus_id: 1,
-    campus_name: 'Dhanmondi Main Campus',
-    relationship: 'Father',
-    is_primary: true,
-    photo: null,
-  },
+  children: [],
+  selected_child: null,
   attendance: {
-    percentage: 96.8,
-    total_sessions: 125,
-    present_count: 119,
-    late_count: 2,
-    absent_count: 3,
-    excused_count: 1,
+    percentage: null,
+    total_sessions: 0,
+    present_count: 0,
+    late_count: 0,
+    absent_count: 0,
+    excused_count: 0,
     consecutive_absences: 0,
     has_alert: false,
-    alert_severity: 'success',
-    alert_message: 'Student attendance is in exemplary standing with no attendance warnings.',
-    streak_days: 18,
-    status_label: 'EXCELLENT',
+    alert_severity: 'info',
+    alert_message: null,
+    streak_days: null,
+    status_label: 'NO_DATA',
   },
   academic_progress: {
-    latest_gpa: 5.00,
-    latest_grade: 'A+',
-    class_rank: 3,
-    section_rank: 1,
-    published_result: {
-      exam_name: 'Half-Yearly Examination 2026',
-      term_name: 'Term 1',
-      gpa: 5.00,
-      final_grade: 'A+',
-      total_marks: 648.5,
-      class_rank: 3,
-      section_rank: 1,
-      is_passed: true,
-      marks_breakdown: [
-        { subject: 'Bangla 1st & 2nd', marks: 165, grade: 'A+', gpa: 5.0 },
-        { subject: 'English 1st & 2nd', marks: 172, grade: 'A+', gpa: 5.0 },
-        { subject: 'Higher Mathematics', marks: 94, grade: 'A+', gpa: 5.0 },
-        { subject: 'Physics', marks: 88, grade: 'A+', gpa: 5.0 },
-        { subject: 'Chemistry', marks: 85, grade: 'A+', gpa: 5.0 },
-      ],
-      teacher_remarks: 'Consistently high engagement across theoretical and lab practical assessments.',
-    },
-    upcoming_examinations: [
-      {
-        id: 1,
-        exam_name: 'Term 2 Final Examination 2026',
-        subject_name: 'Higher Mathematics',
-        exam_date: '2026-11-05',
-        exam_date_formatted: 'Nov 05, 2026',
-        days_left: 20,
-      },
-      {
-        id: 2,
-        exam_name: 'Term 2 Final Examination 2026',
-        subject_name: 'Physics',
-        exam_date: '2026-11-08',
-        exam_date_formatted: 'Nov 08, 2026',
-        days_left: 23,
-      },
-    ],
+    latest_gpa: null,
+    latest_grade: null,
+    class_rank: null,
+    section_rank: null,
+    published_result: null,
+    upcoming_examinations: [],
   },
   financial: {
     ledger_breakdown: {
-      invoiced_amount: 19500.00,
-      waivers_amount: 1500.00,
-      confirmed_collections: 12000.00,
-      refunds_amount: 0.00,
-      outstanding_receivables: 6000.00,
-      accounting_formula: 'Outstanding = (Invoiced - Waivers - Confirmed Collections + Refunds)',
+      invoiced_amount: 0,
+      waivers_amount: 0,
+      confirmed_collections: 0,
+      refunds_amount: 0,
+      outstanding_receivables: 0,
+      accounting_formula: '',
     },
-    outstanding_invoices: [
-      {
-        id: 101,
-        invoice_number: 'INV-2026-0891',
-        title: 'Monthly Tuition & Laboratory Fee — October 2026',
-        month: 10,
-        year: 2026,
-        gross_amount: 6500.00,
-        waiver_discount: 500.00,
-        total_payable: 6000.00,
-        total_paid: 0.00,
-        outstanding_balance: 6000.00,
-        due_date: '2026-10-25',
-        due_date_formatted: 'Oct 25, 2026',
-        is_overdue: false,
-        status: 'UNPAID',
-      },
-    ],
-    payment_receipts: [
-      {
-        id: 201,
-        receipt_number: 'REC-2026-0742',
-        invoice_number: 'INV-2026-0740',
-        amount: 6000.00,
-        payment_method: 'bKash Tokenized',
-        gateway_transaction_id: 'BK_TRX_88A92B10',
-        paid_at: '2026-09-18',
-        paid_at_formatted: 'Sep 18, 2026',
-        status: 'CONFIRMED',
-      },
-      {
-        id: 202,
-        receipt_number: 'REC-2026-0619',
-        invoice_number: 'INV-2026-0615',
-        amount: 6000.00,
-        payment_method: 'SSLCommerz (Visa Card)',
-        gateway_transaction_id: 'SSL_TRX_55C71D88',
-        paid_at: '2026-08-20',
-        paid_at_formatted: 'Aug 20, 2026',
-        status: 'CONFIRMED',
-      },
-    ],
+    outstanding_invoices: [],
+    payment_receipts: [],
   },
   communications: {
-    notices: [
-      {
-        id: 1,
-        title: 'Term 2 Final Examination Routine & Admit Card Collection Circular',
-        category: 'EXAMINATION',
-        priority: 'HIGH',
-        is_pinned: true,
-        summary: 'Guardians are requested to clear all outstanding tuition dues and collect examination admit cards by Nov 01.',
-        has_attachment: true,
-        attachment_url: '/documents/term2-admit-card-circular.pdf',
-        published_at: '2026-10-16T14:00:00Z',
-        published_formatted: '6 hours ago',
-      },
-      {
-        id: 2,
-        title: 'Parent-Teacher Conference & Term 1 Academic Performance Discussion',
-        category: 'ACADEMIC',
-        priority: 'NORMAL',
-        is_pinned: false,
-        summary: 'The quarterly Parent-Teacher Meeting will be held on Saturday from 09:30 AM to 01:00 PM in the auditorium.',
-        has_attachment: false,
-        attachment_url: null,
-        published_at: '2026-10-13T10:00:00Z',
-        published_formatted: '3 days ago',
-      },
-    ],
-    teacher_communications: [
-      {
-        id: 1,
-        teacher_name: 'Prof. Kamal Hossain',
-        teacher_designation: 'Class Teacher (Class 10 Science)',
-        subject: 'Midterm Mathematics Progress & Olympiad Nomination',
-        message: 'Sadman has achieved exceptional results in trigonometry and quadratic functions. We have recommended him for the National Science Olympiad.',
-        date: '2026-10-14',
-        date_formatted: 'Oct 14, 2026',
-        channel: 'FEEDBACK_NOTE',
-      },
-      {
-        id: 2,
-        teacher_name: 'Dr. Fatima Begum',
-        teacher_designation: 'Physics Faculty',
-        subject: 'Physics Practical Notebook Verification',
-        message: 'Please remind student to complete the experimental graph for verification of Ohm\'s law before next Wednesday lab.',
-        date: '2026-10-11',
-        date_formatted: 'Oct 11, 2026',
-        channel: 'HOMEWORK_NOTE',
-      },
-    ],
+    notices: [],
+    teacher_communications: [],
   },
   family_summary: {
-    total_children: 2,
-    total_family_dues: 6000.00,
-    combined_attendance_average: 97.1,
-    all_fees_cleared: false,
+    total_children: 0,
+    total_family_dues: 0,
+    combined_attendance_average: null,
+    all_fees_cleared: true,
   },
 }
 
@@ -417,12 +250,13 @@ async function fetchGuardianDashboard(childId?: number, forceRefresh = false) {
         selectedChildId.value = data.data.selected_child.student_id
       }
     } else {
-      dashboardData.value = fallbackData
-      selectedChildId.value = fallbackData.selected_child?.student_id ?? 101
+      dashboardData.value = null
+      errorMessage.value = 'No dashboard information is available for your account yet. Please contact the school office.'
     }
-  } catch (err: any) {
-    dashboardData.value = fallbackData
-    selectedChildId.value = fallbackData.selected_child?.student_id ?? 101
+  } catch (err) {
+    // Show the real failure instead of silently rendering two sample children with fake dues.
+    dashboardData.value = null
+    errorMessage.value = checkoutErrorMessage(err, 'Unable to load the guardian dashboard right now. Please try again.')
   } finally {
     loading.value = false
   }
@@ -433,7 +267,7 @@ function selectChild(child: ChildProfile) {
   fetchGuardianDashboard(child.student_id)
 }
 
-const current = computed<GuardianOverviewData>(() => dashboardData.value || fallbackData)
+const current = computed<GuardianOverviewData>(() => dashboardData.value || emptyData)
 
 const welcomeTitle = computed(() => {
   const guardianName = current.value.guardian_profile.name || authStore.user?.name || 'Guardian'
@@ -446,112 +280,91 @@ const welcomeSubtitle = computed(() => {
 })
 
 // Parent Online Tuition Payment Modal State
+type PayableInvoice = FinancialInfo['outstanding_invoices'][number]
 const showPayModal = ref(false)
-const selectedPayInvoice = ref<any | null>(null)
-const selectedChannel = ref<'bkash' | 'sslcommerz' | 'nagad'>('bkash')
+const selectedPayInvoice = ref<PayableInvoice | null>(null)
+const selectedGateway = ref<GatewayChoice>('BKASH')
 const customPaymentAmount = ref<number | null>(null)
 const processingPayment = ref(false)
+const payError = ref<string | null>(null)
 
-function openOnlinePaymentModal(invoice?: any) {
-  if (invoice) {
-    selectedPayInvoice.value = invoice
-    customPaymentAmount.value = invoice.outstanding_balance
-  } else if (current.value.financial.outstanding_invoices.length > 0) {
-    selectedPayInvoice.value = current.value.financial.outstanding_invoices[0]
-    customPaymentAmount.value = current.value.financial.outstanding_invoices[0].outstanding_balance
-  } else {
+type GatewayChoice = 'BKASH' | 'SSLCOMMERZ'
+
+function checkoutErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { message?: string; response?: { data?: { message?: string } } } | null
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+/**
+ * Start a real gateway checkout. The gateway redirects back here with ?payment_status=...,
+ * and the dashboard is re-fetched from the server then (no optimistic balance changes).
+ */
+async function startGatewayCheckout(invoiceId: number, gateway: GatewayChoice, amount: number): Promise<void> {
+  const res = await api.post<{ data: { redirect_url?: string } }>('/api/v1/finance/online/initiate', {
+    invoice_id: invoiceId,
+    gateway_name: gateway,
+    amount,
+    return_path: route.path,
+  })
+  const redirectUrl = res.data?.data?.redirect_url
+  if (!redirectUrl) {
+    throw new Error('The payment gateway did not return a checkout page. Please try again later.')
+  }
+  window.location.href = redirectUrl
+}
+
+/** Show the result of a gateway return and drop the query params so a reload doesn't repeat it. */
+function handleGatewayReturn(): boolean {
+  const status = route.query.payment_status
+  if (typeof status !== 'string') return false
+  const ref = typeof route.query.tracking_ref === 'string' ? route.query.tracking_ref : ''
+  const messages: Record<string, { severity: 'success' | 'info' | 'warn' | 'error'; summary: string; detail: string }> = {
+    success: { severity: 'success', summary: 'Payment received', detail: `Your payment ${ref} was confirmed.` },
+    pending: { severity: 'info', summary: 'Payment being confirmed', detail: `The gateway is still confirming ${ref}. Please do not pay again; check back shortly.` },
+    cancelled: { severity: 'warn', summary: 'Payment cancelled', detail: 'The online payment was cancelled. No money was taken.' },
+    failed: { severity: 'error', summary: 'Payment not completed', detail: `The online payment ${ref} could not be completed.` },
+  }
+  const msg = messages[status] ?? messages.failed
+  toast.add({ ...msg, life: 7000 })
+  const { payment_status: _ps, tracking_ref: _tr, ...rest } = route.query
+  router.replace({ query: rest })
+  return true
+}
+
+const payAmountValid = computed(() => {
+  const inv = selectedPayInvoice.value
+  const amt = Number(customPaymentAmount.value)
+  return !!inv && amt >= 1 && amt <= Number(inv.outstanding_balance) + 0.001
+})
+
+function openOnlinePaymentModal(invoice?: PayableInvoice) {
+  const target = invoice ?? current.value.financial.outstanding_invoices[0]
+  if (!target) {
     toast.add({
       severity: 'info',
-      summary: 'No Outstanding Dues',
-      detail: 'All tuition and academic fees for your linked children are fully settled.',
+      summary: 'No outstanding dues',
+      detail: 'All fees for your linked children are paid.',
       life: 3000,
     })
     return
   }
-  selectedChannel.value = 'bkash'
+  selectedPayInvoice.value = target
+  customPaymentAmount.value = Number(target.outstanding_balance)
+  selectedGateway.value = 'BKASH'
+  payError.value = null
   showPayModal.value = true
 }
 
 async function confirmOnlinePayment() {
-  if (!selectedPayInvoice.value) return
   const inv = selectedPayInvoice.value
-  const amountToPay = customPaymentAmount.value && customPaymentAmount.value > 0
-    ? Math.min(customPaymentAmount.value, inv.outstanding_balance)
-    : inv.outstanding_balance
-
+  if (!inv || !payAmountValid.value || processingPayment.value) return
   processingPayment.value = true
-  const idempotencyKey = `PARENT-PAY-${inv.id}-${Date.now()}`
-
+  payError.value = null
   try {
-    const channelName = selectedChannel.value === 'bkash'
-      ? 'bKash Tokenized'
-      : (selectedChannel.value === 'nagad' ? 'Nagad Online' : 'SSLCommerz (Cards/NetBanking)')
-
-    const res = await api.post(
-      '/api/v1/finance/payments/collect',
-      {
-        invoice_id: inv.id,
-        amount: amountToPay,
-        payment_method: channelName,
-        paid_at: new Date().toISOString().substring(0, 10),
-        notes: `Parent Online Settlement via ${selectedChannel.value.toUpperCase()}`,
-        idempotency_key: idempotencyKey,
-      },
-      {
-        headers: { 'Idempotency-Key': idempotencyKey },
-      }
-    )
-
-    const receiptNo = res.data?.data?.receipt_number || `REC-${Date.now().toString().slice(-6)}`
-
-    // Update local state: reduce invoice balance or remove if settled
-    const outstandingInvs = current.value.financial.outstanding_invoices
-    const idx = outstandingInvs.findIndex((i) => i.id === inv.id)
-    if (idx !== -1) {
-      if (amountToPay >= inv.outstanding_balance) {
-        outstandingInvs.splice(idx, 1)
-      } else {
-        outstandingInvs[idx].outstanding_balance -= amountToPay
-        outstandingInvs[idx].total_paid += amountToPay
-      }
-    }
-
-    // Decrement total outstanding dues
-    current.value.financial.ledger_breakdown.outstanding_receivables = Math.max(
-      0,
-      current.value.financial.ledger_breakdown.outstanding_receivables - amountToPay
-    )
-    current.value.financial.ledger_breakdown.confirmed_collections += amountToPay
-
-    // Append new receipt
-    current.value.financial.payment_receipts.unshift({
-      id: Date.now(),
-      receipt_number: receiptNo,
-      invoice_number: inv.invoice_number,
-      amount: amountToPay,
-      payment_method: channelName,
-      gateway_transaction_id: `GW_${Date.now().toString().slice(-8)}`,
-      paid_at: new Date().toISOString().substring(0, 10),
-      paid_at_formatted: 'Just now',
-      status: 'CONFIRMED',
-    })
-
-    showPayModal.value = false
-    toast.add({
-      severity: 'success',
-      summary: 'Tuition Payment Confirmed',
-      detail: `Payment of ${formatBDT(amountToPay)} settled successfully. Receipt #${receiptNo} generated.`,
-      life: 5000,
-    })
-  } catch (err: any) {
-    const errorMsg = err.response?.data?.message || err.message || 'Payment processing error.'
-    toast.add({
-      severity: 'error',
-      summary: 'Payment Failed',
-      detail: errorMsg,
-      life: 5000,
-    })
-  } finally {
+    await startGatewayCheckout(inv.id, selectedGateway.value, Math.round(Number(customPaymentAmount.value) * 100) / 100)
+    // Browser is navigating to the gateway; keep the button busy.
+  } catch (err) {
+    payError.value = checkoutErrorMessage(err, 'Could not start the online payment. Please try again.')
     processingPayment.value = false
   }
 }
@@ -575,7 +388,9 @@ function viewNotice(notice: any) {
 }
 
 onMounted(() => {
-  fetchGuardianDashboard()
+  // Returning from the gateway: always re-read balances from the server.
+  const returned = handleGatewayReturn()
+  fetchGuardianDashboard(undefined, returned)
 })
 </script>
 
@@ -585,7 +400,6 @@ onMounted(() => {
     <PageHeader
       :title="welcomeTitle"
       :subtitle="welcomeSubtitle"
-      icon="pi pi-shield"
     >
       <template #actions>
         <span class="family-badge">
@@ -687,12 +501,13 @@ onMounted(() => {
             <div class="kpi-icon"><i class="pi pi-check-circle"></i></div>
           </div>
           <div class="kpi-content">
-            <h2 class="kpi-number">{{ current.attendance.percentage }}%</h2>
-            <span class="kpi-meta">
+            <h2 class="kpi-number">{{ current.attendance.percentage != null ? `${current.attendance.percentage}%` : '—' }}</h2>
+            <span v-if="current.attendance.total_sessions > 0" class="kpi-meta">
               <strong>{{ current.attendance.present_count }}</strong> Present •
-              <strong>{{ current.attendance.absent_count }}</strong> Absent •
-              <strong>{{ current.attendance.streak_days }} days</strong> Streak
+              <strong>{{ current.attendance.absent_count }}</strong> Absent
+              <template v-if="current.attendance.streak_days != null"> • <strong>{{ current.attendance.streak_days }} days</strong> Streak</template>
             </span>
+            <span v-else class="kpi-meta">No attendance recorded yet</span>
           </div>
         </div>
 
@@ -703,11 +518,17 @@ onMounted(() => {
             <div class="kpi-icon"><i class="pi pi-star"></i></div>
           </div>
           <div class="kpi-content">
-            <h2 class="kpi-number">GPA {{ current.academic_progress.latest_gpa.toFixed(2) }}</h2>
-            <span class="kpi-meta">
-              Grade <strong>{{ current.academic_progress.latest_grade }}</strong> •
-              Rank: Class <strong>#{{ current.academic_progress.class_rank }}</strong>
-            </span>
+            <template v-if="current.academic_progress.latest_gpa != null">
+              <h2 class="kpi-number">GPA {{ current.academic_progress.latest_gpa.toFixed(2) }}</h2>
+              <span class="kpi-meta">
+                Grade <strong>{{ current.academic_progress.latest_grade }}</strong>
+                <template v-if="current.academic_progress.class_rank != null"> • Rank: Class <strong>#{{ current.academic_progress.class_rank }}</strong></template>
+              </span>
+            </template>
+            <template v-else>
+              <h2 class="kpi-number">—</h2>
+              <span class="kpi-meta">No published results yet</span>
+            </template>
           </div>
         </div>
 
@@ -875,7 +696,7 @@ onMounted(() => {
             <div class="report-top-banner">
               <div>
                 <h4 class="term-name">{{ current.academic_progress.published_result.exam_name }}</h4>
-                <span class="term-sub">Class Rank: <strong>#{{ current.academic_progress.class_rank }}</strong> • Section Rank: <strong>#{{ current.academic_progress.section_rank }}</strong></span>
+                <span v-if="current.academic_progress.class_rank != null" class="term-sub">Class Rank: <strong>#{{ current.academic_progress.class_rank }}</strong> • Section Rank: <strong>#{{ current.academic_progress.section_rank }}</strong></span>
               </div>
               <div class="gpa-box">
                 <span class="gpa-val">GPA {{ current.academic_progress.published_result.gpa.toFixed(2) }}</span>
@@ -896,14 +717,15 @@ onMounted(() => {
                 :key="idx"
                 class="table-body-row"
               >
-                <span class="font-medium text-slate-800">{{ row.subject }}</span>
-                <span class="font-bold">{{ row.marks }}</span>
-                <span class="grade-tag">{{ row.grade }}</span>
-                <span class="font-semibold">{{ row.gpa.toFixed(1) }}</span>
+                <!-- Published snapshots use subject_name/total_obtained/letter_grade/grade_point -->
+                <span class="font-medium text-slate-800">{{ row.subject ?? row.subject_name }}</span>
+                <span class="font-bold">{{ row.marks ?? row.total_obtained }}</span>
+                <span class="grade-tag">{{ row.grade ?? row.letter_grade }}</span>
+                <span class="font-semibold">{{ Number(row.gpa ?? row.grade_point ?? 0).toFixed(1) }}</span>
               </div>
             </div>
 
-            <div class="teacher-remarks-box">
+            <div v-if="current.academic_progress.published_result.teacher_remarks" class="teacher-remarks-box">
               <span class="remarks-title"><i class="pi pi-comment"></i> Homeroom Teacher Remarks:</span>
               <p class="remarks-text">"{{ current.academic_progress.published_result.teacher_remarks }}"</p>
             </div>
@@ -998,13 +820,12 @@ onMounted(() => {
         <!-- Payment Amount Input (Supports partial or full payment) -->
         <div class="flex flex-col gap-1.5">
           <label class="text-xs font-bold text-slate-700">Payment Amount (৳ BDT)</label>
-          <InputText
+          <input
             v-model.number="customPaymentAmount"
             type="number"
             :max="selectedPayInvoice.outstanding_balance"
-            min="100"
-            class="w-full font-mono text-base font-bold"
-          />
+            min="1"
+            class="p-inputtext p-component w-full font-mono text-base font-bold" />
           <div class="flex justify-between items-center text-[11px] text-slate-400 mt-0.5">
             <span>You can pay the full amount or make a partial instalment.</span>
             <button
@@ -1017,55 +838,50 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Gateway / Payment Channel Selection -->
+        <!-- Gateway selection -->
         <div class="flex flex-col gap-2">
-          <label class="text-xs font-bold text-slate-700">Select Instant Payment Gateway</label>
-          <div class="grid grid-cols-3 gap-3">
+          <span class="text-xs font-bold text-slate-700">Payment method</span>
+          <div class="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Payment method">
             <button
               type="button"
+              role="radio"
+              :aria-checked="selectedGateway === 'BKASH'"
               class="p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer"
-              :class="selectedChannel === 'bkash' ? 'border-pink-500 bg-pink-50/50 shadow-xs ring-2 ring-pink-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
-              @click="selectedChannel = 'bkash'"
+              :class="selectedGateway === 'BKASH' ? 'border-pink-500 bg-pink-50/50 shadow-xs ring-2 ring-pink-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
+              @click="selectedGateway = 'BKASH'"
             >
               <span class="font-bold text-pink-600 text-sm">bKash</span>
-              <span class="text-[10px] text-slate-500">Instant Wallet</span>
+              <span class="text-[10px] text-slate-500">Mobile wallet</span>
             </button>
 
             <button
               type="button"
+              role="radio"
+              :aria-checked="selectedGateway === 'SSLCOMMERZ'"
               class="p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer"
-              :class="selectedChannel === 'sslcommerz' ? 'border-emerald-500 bg-emerald-50/50 shadow-xs ring-2 ring-emerald-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
-              @click="selectedChannel = 'sslcommerz'"
+              :class="selectedGateway === 'SSLCOMMERZ' ? 'border-emerald-500 bg-emerald-50/50 shadow-xs ring-2 ring-emerald-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
+              @click="selectedGateway = 'SSLCOMMERZ'"
             >
-              <span class="font-bold text-emerald-700 text-sm">Cards & Bank</span>
+              <span class="font-bold text-emerald-700 text-sm">Card / Net banking</span>
               <span class="text-[10px] text-slate-500">SSLCommerz</span>
-            </button>
-
-            <button
-              type="button"
-              class="p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer"
-              :class="selectedChannel === 'nagad' ? 'border-orange-500 bg-orange-50/50 shadow-xs ring-2 ring-orange-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
-              @click="selectedChannel = 'nagad'"
-            >
-              <span class="font-bold text-orange-600 text-sm">Nagad</span>
-              <span class="text-[10px] text-slate-500">Digital Post</span>
             </button>
           </div>
         </div>
 
-        <!-- Security / Guarantee Badge -->
-        <div class="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl flex items-center gap-2.5 text-xs text-emerald-800">
-          <i class="pi pi-shield text-emerald-600 text-base shrink-0"></i>
-          <span>Official 256-bit encrypted school payment gateway. A verified digital receipt will be issued instantly upon completion.</span>
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600">
+          You will be taken to the payment provider's page. Your receipt appears here once the provider confirms the payment.
         </div>
+
+        <p v-if="payError" class="text-xs text-red-600" role="alert">{{ payError }}</p>
 
         <!-- Action Buttons -->
         <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-200">
           <AppButton label="Cancel" severity="secondary" text @click="showPayModal = false" />
           <AppButton
-            :label="`Confirm Payment of ${formatBDT(customPaymentAmount || selectedPayInvoice.outstanding_balance)}`"
-            icon="pi pi-check"
+            :label="`Pay ${formatBDT(customPaymentAmount || 0)}`"
+            icon="pi pi-arrow-right"
             severity="success"
+            :disabled="!payAmountValid"
             :loading="processingPayment"
             @click="confirmOnlinePayment()"
           />

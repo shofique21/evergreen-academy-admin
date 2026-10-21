@@ -4,14 +4,20 @@ import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
+import { formatBDT } from '@/utils/formatters'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
 import DataTableWrapper from '@/components/common/DataTableWrapper.vue'
+import IssuedCredentialsDialog from '@/components/common/IssuedCredentialsDialog.vue'
+import FeeWaiverEditor, { type AdmissionWaiver } from '@/components/finance/FeeWaiverEditor.vue'
+import StudentWaiversPanel from '@/components/finance/StudentWaiversPanel.vue'
+
+// One-time display of a newly admitted student's login details
+const credentialsVisible = ref(false)
+const issuedCredentials = ref<{ name?: string; email?: string; password?: string; loginUrl?: string }>({})
 import Column from 'primevue/column'
 import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
-import Tag from 'primevue/tag'
 
 interface StudentRecord {
   id: number
@@ -27,8 +33,11 @@ interface StudentRecord {
   present_address?: string
   permanent_address?: string
   status: string
+  created_at?: string
   enrollment?: {
     session?: string
+    academic_year_id?: number
+    class_id?: number
     roll_number: number
     class: string
     section: string
@@ -137,6 +146,14 @@ const canWithdraw = computed(() => {
   )
 })
 
+// Scholarships & waivers: finance/office staff only (students and parents must not see other children's)
+const canViewWaivers = computed(() =>
+  !isTeacher.value && (authStore.isSuperAdmin || authStore.hasPermission('fees.structures.manage') || authStore.hasPermission('fees.reports'))
+)
+const canManageWaivers = computed(() => authStore.isSuperAdmin || authStore.hasPermission('fees.structures.manage'))
+
+const canAdmit = computed(() => authStore.isSuperAdmin || authStore.hasPermission('students.create'))
+
 const canChangeStatus = computed(() => {
   if (isTeacher.value) return false
   return (
@@ -181,6 +198,7 @@ const admissionForm = ref({
   emergency_phone: '',
   present_address: '',
   opening_balance_arrears: 0,
+  waivers: [] as AdmissionWaiver[],
   guardian: {
     name: '',
     phone: '',
@@ -211,6 +229,7 @@ function resetAdmissionForm() {
     emergency_phone: '',
     present_address: '',
     opening_balance_arrears: 0,
+    waivers: [],
     guardian: {
       name: '',
       phone: '',
@@ -355,6 +374,11 @@ const promoteForm = ref({
     new_roll: number
     arrears_balance: number
     selected: boolean
+    // From the promotion rules preview (when available)
+    status?: string
+    remarks?: string
+    gpa?: number | null
+    attendance_percent?: number | null
   }>,
 })
 const targetSectionsList = ref<{ id: number; name: string }[]>([])
@@ -776,6 +800,7 @@ async function handleExecuteGraduation() {
 }
 
 async function handleAdmitStudent() {
+  if (admitting.value) return // ignore a double click while the first request runs
   admissionErrors.value = {}
   if (
     !admissionForm.value.first_name ||
@@ -794,9 +819,36 @@ async function handleAdmitStudent() {
 
   try {
     admitting.value = true
-    const { data } = await api.post('/api/v1/students', admissionForm.value)
+    const { data } = await api.post('/api/v1/students', {
+      ...admissionForm.value,
+      // Send only completed scholarship rows
+      waivers: admissionForm.value.waivers
+        .filter((w) => w.fee_head_id && Number(w.discount_value) > 0)
+        .map((w) => ({ ...w, staff_user_id: w.waiver_category === 'STAFF_CHILD' ? w.staff_user_id || null : null })),
+    })
     notifySuccess('Admission Completed', data.message || 'Student enrolled successfully.')
+    const bill = data?.data?.invoice
+    if (bill) {
+      const discount = Number(bill.waiver_discount) || 0
+      notifySuccess(
+        'First bill created',
+        `${bill.invoice_number}: ${formatBDT(bill.total_payable)} due` +
+          (discount > 0 ? ` (after ${formatBDT(discount)} scholarship/waiver)` : '')
+      )
+    } else if (data?.data?.billing_warning) {
+      notifyWarn('No bill created', data.data.billing_warning)
+    }
     admissionDialogVisible.value = false
+    const creds = data?.data?.credentials
+    if (creds?.temporary_password) {
+      issuedCredentials.value = {
+        name: data.data.full_name ?? data.data.user?.name,
+        email: creds.email,
+        password: creds.temporary_password,
+        loginUrl: creds.login_url,
+      }
+      credentialsVisible.value = true
+    }
     await fetchStudents(1)
   } catch (err: unknown) {
     const errorObj = err as { message?: string; errors?: Record<string, string[]> }
@@ -818,15 +870,14 @@ onMounted(async () => {
 <template>
   <div class="students-page">
     <PageHeader
-      title="Student Information System (SIS)"
-      subtitle="Centralized student directory, enrollment records, Bangladesh NCTB class levels, promotions, and guardian relationships"
-      showBreadcrumbs
+      title="Students"
+      subtitle="Student directory, enrollments, promotions and guardians."
     >
       <template #actions>
         <Button
+          v-if="canAdmit"
           label="Admit Student"
           icon="pi pi-user-plus"
-          class="brand-gradient-bg border-none"
           @click="admissionDialogVisible = true"
         />
         <Button
@@ -938,7 +989,7 @@ onMounted(async () => {
           <template #body="{ data }">
             <StatusBadge
               v-if="data.enrollment && data.enrollment.arrears_balance > 0"
-              :status="`৳ ${data.enrollment.arrears_balance.toLocaleString()}`"
+              :status="formatBDT(data.enrollment.arrears_balance)"
               severity="warn"
             />
             <StatusBadge v-else status="CLEARED" />
@@ -1031,7 +1082,7 @@ onMounted(async () => {
               <StatusBadge v-else :status="selectedStudent.status" size="small" showDot />
             </div>
             <p class="modal-subtitle text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-              <span>Official SIS Student Dossier</span>
+              <span>Student profile</span>
               <span class="text-slate-300">&bull;</span>
               <span v-if="selectedStudent.enrollment" class="font-medium text-emerald-800">
                 Grade: <strong>{{ selectedStudent.enrollment.class }}</strong> &bull;
@@ -1046,14 +1097,14 @@ onMounted(async () => {
           <div class="applicant-avatar"><i class="pi pi-user text-xl"></i></div>
           <div class="modal-header-text">
             <h2 class="modal-title font-bold text-slate-900 text-lg">Student Profile</h2>
-            <p class="modal-subtitle text-xs text-slate-500">Official SIS Student Dossier</p>
+            <p class="modal-subtitle text-xs text-slate-500">Student profile</p>
           </div>
         </div>
       </template>
 
       <div v-if="detailsLoading" class="py-16 text-center text-slate-500 flex flex-col items-center justify-center gap-2.5">
         <i class="pi pi-spin pi-spinner text-3xl text-emerald-600"></i>
-        <span class="text-xs font-semibold tracking-wide uppercase text-slate-400">Loading student dossier...</span>
+        <span class="text-xs font-medium text-slate-400">Loading student...</span>
       </div>
 
       <div v-else-if="selectedStudent" class="details-modal-body">
@@ -1105,7 +1156,7 @@ onMounted(async () => {
               <i class="pi pi-wallet text-amber-600 text-xs"></i> Opening Arrears
             </span>
             <span class="summary-val font-mono font-bold" :class="(selectedStudent.enrollment?.arrears_balance || 0) > 0 ? 'text-amber-700' : 'text-emerald-700'">
-              ৳ {{ Number(selectedStudent.enrollment?.arrears_balance || 0).toLocaleString() }}
+              {{ formatBDT(selectedStudent.enrollment?.arrears_balance || 0) }}
               <span v-if="(selectedStudent.enrollment?.arrears_balance || 0) === 0" class="text-xs font-sans font-medium text-emerald-600">
                 (Clear)
               </span>
@@ -1188,14 +1239,25 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Section 2: Academic Enrollment History (Immutable Ledger) -->
+        <!-- Scholarships & Waivers (current session) -->
+        <div v-if="canViewWaivers && selectedStudent.enrollment?.academic_year_id" class="detail-section">
+          <div class="section-title-clean">
+            <i class="pi pi-percentage text-emerald-600"></i>
+            <span>Scholarships &amp; Waivers</span>
+          </div>
+          <StudentWaiversPanel
+            :student-id="selectedStudent.id"
+            :academic-year-id="selectedStudent.enrollment.academic_year_id"
+            :class-id="selectedStudent.enrollment.class_id"
+            :can-manage="canManageWaivers"
+          />
+        </div>
+
+        <!-- Section 2: Academic Enrollment History -->
         <div class="detail-section">
           <div class="section-title-clean">
             <i class="pi pi-history text-emerald-600"></i>
             <span>Academic Enrollment History</span>
-            <span class="ml-auto inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <i class="pi pi-lock text-[9px]"></i> Immutable Ledger
-            </span>
           </div>
 
           <div v-if="selectedStudent.enrollment_history && selectedStudent.enrollment_history.length > 0" class="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
@@ -1231,7 +1293,7 @@ onMounted(async () => {
                   <td class="py-3.5 px-4">
                     <StatusBadge :status="h.status" size="small" />
                   </td>
-                  <td class="py-3.5 px-4 font-mono font-semibold text-slate-800">৳ {{ Number(h.arrears_balance).toLocaleString() }}</td>
+                  <td class="py-3.5 px-4 font-mono font-semibold text-slate-800">{{ formatBDT(h.arrears_balance) }}</td>
                   <td class="py-3.5 px-4 font-mono text-slate-500">{{ formatDate(h.created_at) }}</td>
                 </tr>
               </tbody>
@@ -1324,7 +1386,7 @@ onMounted(async () => {
               </label>
               <div class="flex items-center gap-2.5">
                 <Button label="Cancel" text size="small" severity="secondary" @click="showAddGuardian = false" />
-                <Button label="Save Guardian" icon="pi pi-check" size="small" :loading="addingGuardian" class="brand-gradient-bg border-none px-5 py-2 font-semibold" @click="handleAttachGuardian" />
+                <Button label="Save Guardian" icon="pi pi-check" size="small" :loading="addingGuardian" class="px-5 py-2 font-semibold" @click="handleAttachGuardian" />
               </div>
             </div>
           </div>
@@ -1448,12 +1510,12 @@ onMounted(async () => {
               </div>
             </div>
             <div class="text-right shrink-0">
-              <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Arrears Balance</span>
+              <span class="text-xs font-medium text-slate-500 block">Arrears Balance</span>
               <span
                 class="text-xs font-bold font-mono"
                 :class="(transferTargetStudent.enrollment?.arrears_balance || 0) > 0 ? 'text-amber-600' : 'text-emerald-700'"
               >
-                ৳ {{ Number(transferTargetStudent.enrollment?.arrears_balance || 0).toLocaleString() }}
+                {{ formatBDT(transferTargetStudent.enrollment?.arrears_balance || 0) }}
               </span>
             </div>
           </div>
@@ -1461,15 +1523,15 @@ onMounted(async () => {
           <!-- Current Placement Data Grid -->
           <div class="grid grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/80 text-xs">
             <div class="bg-white rounded-lg p-2.5 border border-slate-200">
-              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Grade / Class</span>
+              <span class="text-xs text-slate-500 block font-medium">Grade / Class</span>
               <span class="font-bold text-slate-800">{{ transferTargetStudent.enrollment?.class || '—' }}</span>
             </div>
             <div class="bg-white rounded-lg p-2.5 border border-slate-200">
-              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Current Section</span>
+              <span class="text-xs text-slate-500 block font-medium">Current Section</span>
               <span class="font-bold text-slate-800">{{ transferTargetStudent.enrollment?.section || '—' }}</span>
             </div>
             <div class="bg-white rounded-lg p-2.5 border border-slate-200">
-              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Current Roll</span>
+              <span class="text-xs text-slate-500 block font-medium">Current Roll</span>
               <span class="font-bold text-slate-800">#{{ transferTargetStudent.enrollment?.roll_number || '—' }}</span>
             </div>
           </div>
@@ -1613,7 +1675,7 @@ onMounted(async () => {
           <ul class="text-xs text-blue-900/90 space-y-1.5 pl-4 list-disc leading-relaxed">
             <li>Student status will transition to <strong class="font-bold text-blue-950">TRANSFERRED_OUT</strong>.</li>
             <li>Releases current seat in Section <strong>{{ transferTargetStudent.enrollment?.section }}</strong>.</li>
-            <li>Historical marks, transcripts, and financial records remain permanently preserved in the immutable ledger.</li>
+            <li>Historical marks, transcripts, and financial records are kept on record.</li>
           </ul>
         </div>
 
@@ -1630,7 +1692,7 @@ onMounted(async () => {
           <!-- Preset Reason Suggestions -->
           <div class="space-y-2">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <span class="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                 <i class="pi pi-bolt text-emerald-600"></i>
                 Preset Reason Suggestions
               </span>
@@ -1702,7 +1764,7 @@ onMounted(async () => {
               :label="transferForm.type === 'SECTION_TRANSFER' ? 'Confirm Section Transfer' : 'Execute Transfer Out'"
               :icon="transferForm.type === 'SECTION_TRANSFER' ? 'pi pi-check' : 'pi pi-external-link'"
               :loading="transferring"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
@@ -1750,7 +1812,7 @@ onMounted(async () => {
               </div>
             </div>
             <div class="text-right shrink-0">
-              <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Current Seat</span>
+              <span class="text-xs font-medium text-slate-500 block">Current Seat</span>
               <span class="text-xs font-bold text-slate-700">
                 {{ withdrawTargetStudent.enrollment?.class }} • {{ withdrawTargetStudent.enrollment?.section }} (Roll #{{ withdrawTargetStudent.enrollment?.roll_number }})
               </span>
@@ -1772,19 +1834,19 @@ onMounted(async () => {
                   : 'Financial Clearance: Zero Outstanding Balance' }}
               </span>
             </div>
-            <span class="font-bold font-mono text-sm">৳ {{ Number(withdrawTargetStudent.enrollment?.arrears_balance || 0).toLocaleString() }}</span>
+            <span class="font-bold font-mono text-sm">{{ formatBDT(withdrawTargetStudent.enrollment?.arrears_balance || 0) }}</span>
           </div>
         </div>
 
         <!-- Institutional Record Notice -->
         <div class="form-section-card bg-rose-50/60 border-rose-200">
-          <div class="flex items-center gap-2 font-bold text-rose-800 uppercase tracking-wider text-[11px] pb-1 border-b border-rose-200/70">
+          <div class="flex items-center gap-2 font-semibold text-rose-800 text-xs pb-1 border-b border-rose-200/70">
             <i class="pi pi-exclamation-triangle text-rose-600"></i>
             <span>Institutional Audit Protocol</span>
           </div>
           <p class="text-xs leading-relaxed text-rose-900">
             Withdrawing permanently transitions the student status to <strong class="font-bold">INACTIVE</strong> and archives current enrollment as <strong class="font-bold">WITHDRAWN</strong>.
-            All historical marks, attendance, and transcripts remain preserved in the immutable ledger.
+            All historical marks, attendance, and transcripts are kept on record.
           </p>
         </div>
 
@@ -1815,7 +1877,7 @@ onMounted(async () => {
           <!-- Preset Reason Suggestions -->
           <div class="space-y-2 pt-2">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <span class="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                 <i class="pi pi-bolt text-rose-600"></i>
                 Preset Reason Suggestions
               </span>
@@ -1900,7 +1962,7 @@ onMounted(async () => {
               icon="pi pi-user-minus"
               severity="danger"
               :loading="withdrawing"
-              class="px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
@@ -1950,7 +2012,7 @@ onMounted(async () => {
               </div>
             </div>
             <div class="text-right shrink-0">
-              <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider mb-0.5">Current Status</span>
+              <span class="text-xs font-medium text-slate-500 block mb-0.5">Current Status</span>
               <StatusBadge :status="statusTargetStudent.status" showDot size="small" />
             </div>
           </div>
@@ -2063,7 +2125,7 @@ onMounted(async () => {
               label="Save Status Changes"
               icon="pi pi-check"
               :loading="updatingStatus"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
@@ -2282,7 +2344,7 @@ onMounted(async () => {
               label="Promote Selected Students"
               icon="pi pi-check"
               :loading="promoting"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
               @click="handleExecutePromotion"
             />
           </div>
@@ -2315,7 +2377,7 @@ onMounted(async () => {
       <form @submit.prevent="handleExecuteGraduation" class="intake-form-body">
         <div class="p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-200 text-xs leading-relaxed">
           <i class="pi pi-verified mr-1 text-emerald-600 font-bold"></i>
-          Graduation converts student status to <strong class="font-bold">GRADUATED</strong> and finalizes their academic transcript records in the immutable ledger.
+          Graduation converts student status to <strong class="font-bold">GRADUATED</strong> and finalizes their academic transcript records, which are kept on record.
         </div>
 
         <div class="form-section-card">
@@ -2355,7 +2417,7 @@ onMounted(async () => {
 
         <div class="intake-form-footer">
           <div class="text-xs text-slate-400 font-mono">
-            SIS Final Clearance
+            Final Clearance
           </div>
           <div class="flex items-center gap-2.5">
             <Button label="Cancel" severity="secondary" outlined @click="graduateDialogVisible = false" />
@@ -2364,7 +2426,7 @@ onMounted(async () => {
               label="Confirm Graduation"
               icon="pi pi-graduation-cap"
               :loading="graduating"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
@@ -2467,6 +2529,14 @@ onMounted(async () => {
               </div>
             </FormField>
           </div>
+
+          <FormField id="admission_waivers" label="Scholarship / Fee Waiver (optional)" :error="admissionErrors.waivers">
+            <FeeWaiverEditor
+              v-model="admissionForm.waivers"
+              :academic-year-id="admissionForm.academic_year_id"
+              :class-id="admissionForm.class_id"
+            />
+          </FormField>
         </div>
 
         <!-- Section 2: Student Demographic & Identity -->
@@ -2735,12 +2805,21 @@ onMounted(async () => {
               label="Complete Admission"
               icon="pi pi-check-circle"
               :loading="admitting"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
       </form>
     </Dialog>
+
+    <!-- New student's login details, shown once to the office -->
+    <IssuedCredentialsDialog
+      v-model:visible="credentialsVisible"
+      :name="issuedCredentials.name"
+      :email="issuedCredentials.email"
+      :password="issuedCredentials.password"
+      :login-url="issuedCredentials.loginUrl"
+    />
   </div>
 </template>
 

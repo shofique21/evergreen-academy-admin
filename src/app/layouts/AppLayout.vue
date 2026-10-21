@@ -52,7 +52,7 @@ const detectedPersona = computed<'admin' | 'teacher' | 'student' | 'parent' | 's
 .layout-container {
   display: flex;
   min-height: 100vh;
-  background: #f8fafc;
+  background: var(--surface-50);
 }
 
 .layout-main {

@@ -92,9 +92,8 @@ onMounted(() => {
 <template>
   <div class="users-view">
     <PageHeader
-      title="User Management & Access Control"
-      subtitle="Enterprise multi-role persona administration, status toggling, and user access"
-      showBreadcrumbs
+      title="Users"
+      subtitle="Manage user accounts, roles and access."
     />
 
     <div class="table-card glass-panel">

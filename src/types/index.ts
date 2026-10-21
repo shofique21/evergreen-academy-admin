@@ -32,6 +32,10 @@ export interface User {
   user_type: string
   is_active: boolean
   avatar: string | null
+  mfa_enabled?: boolean
+  mfa_type?: string
+  mfa_backup_codes_remaining?: number
+  must_change_password?: boolean
   roles: string[]
   permissions: string[]
   created_at?: string
@@ -558,7 +562,8 @@ export interface AdmissionApplication {
   classLevel?: ClassLevel
   academicYear?: AcademicYear
   reviewer?: User | null
-  enrolledStudent?: Student | null
+  // Laravel serializes relations in snake_case
+  enrolled_student?: (Student & { current_enrollment?: { roll_number?: number | null } | null }) | null
 }
 
 // Attendance Domain Types

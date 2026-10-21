@@ -35,7 +35,7 @@ const mobileNavOpen = ref(false)
 .layout-container {
   display: flex;
   min-height: 100vh;
-  background: #f8fafc;
+  background: var(--surface-50);
 }
 
 .layout-main {
