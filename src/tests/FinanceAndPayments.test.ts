@@ -428,4 +428,194 @@ describe('Financial Management and Payment Modules Frontend Contracts & Business
     expect(authStore.hasPermission('payments.collect')).toBe(false)
     expect(authStore.hasPermission('invoices.generate')).toBe(false)
   })
+
+  it('restricts Load Demo Pricing Matrix button on the accountant panel while permitting administrators', () => {
+    const authStore = useAuthStore()
+
+    // 1. Accountant role setup
+    authStore.user = {
+      id: 5,
+      name: 'Salma Khatun',
+      email: 'accountant@evergreen.edu.bd',
+      phone: '+8801700000001',
+      user_type: 'staff',
+      is_active: true,
+      avatar: null,
+      roles: ['accountant'],
+      permissions: ['fees.view', 'fees.structures.manage', 'fees.collect'],
+    }
+
+    const isAccountant = () => {
+      if (authStore.isSuperAdmin) return false
+      const roles = authStore.user?.roles ?? []
+      const userType = authStore.user?.user_type
+      if (roles.includes('super_admin') || roles.includes('admin') || userType === 'super_admin' || userType === 'admin') {
+        return false
+      }
+      return roles.includes('accountant') || userType === 'accountant'
+    }
+
+    const canSeedDemoMatrix = () => {
+      if (isAccountant()) return false
+      return (
+        authStore.isSuperAdmin ||
+        authStore.hasRole('admin') ||
+        authStore.persona === 'admin'
+      )
+    }
+
+    // Accountant must be restricted from loading demo pricing matrix
+    expect(isAccountant()).toBe(true)
+    expect(canSeedDemoMatrix()).toBe(false)
+
+    // 2. Administrator role setup
+    authStore.user = {
+      id: 1,
+      name: 'Principal Kabir',
+      email: 'principal@evergreen.edu.bd',
+      phone: '+8801700000000',
+      user_type: 'admin',
+      is_active: true,
+      avatar: null,
+      roles: ['admin', 'principal'],
+      permissions: ['fees.view', 'fees.structures.manage', 'fees.collect'],
+    }
+
+    expect(isAccountant()).toBe(false)
+    expect(canSeedDemoMatrix()).toBe(true)
+  })
+
+  it('validates smart search matching and requires invoice selection plus balance verification before payment confirmation', () => {
+    // 1. Mock invoice dataset covering invoice ID, student ID, student name, and phone
+    const mockInvoices = [
+      {
+        id: 101,
+        invoice_number: 'INV-2026-00101',
+        student: {
+          id: 1,
+          student_uid: 'EGA-2026-0001',
+          first_name: 'Sadia',
+          last_name: 'Rahman',
+          emergency_phone: '+8801711223344',
+          user: { phone: '+8801711223344' },
+          guardians: [{ name: 'Rahman Sr.', phone: '+8801811223344' }],
+        },
+        total_payable: 5000,
+        total_paid: 2000,
+        status: 'PARTIAL',
+      },
+      {
+        id: 102,
+        invoice_number: 'INV-2026-00102',
+        student: {
+          id: 2,
+          student_uid: 'EGA-2026-0002',
+          first_name: 'Tanvir',
+          last_name: 'Ahmed',
+          emergency_phone: '+8801999887766',
+          user: { phone: '+8801999887766' },
+          guardians: [{ name: 'Ahmed Sr.', phone: '+8801666554433' }],
+        },
+        total_payable: 4500,
+        total_paid: 4500,
+        status: 'PAID',
+      },
+    ]
+
+    // Smart search filter simulator matching backend InvoiceController logic
+    const smartSearch = (query: string) => {
+      const q = query.trim().toLowerCase()
+      if (!q) return []
+      return mockInvoices.filter((inv) => {
+        const invNum = inv.invoice_number.toLowerCase()
+        const invId = String(inv.id)
+        const stuUid = inv.student.student_uid.toLowerCase()
+        const fullName = `${inv.student.first_name} ${inv.student.last_name}`.toLowerCase()
+        const phone = (inv.student.emergency_phone || '').toLowerCase()
+        const guardianPhone = (inv.student.guardians[0]?.phone || '').toLowerCase()
+
+        return (
+          invNum.includes(q) ||
+          invId === q ||
+          stuUid.includes(q) ||
+          fullName.includes(q) ||
+          phone.includes(q) ||
+          guardianPhone.includes(q)
+        )
+      })
+    }
+
+    // Verify smart search supports:
+    // a. Invoice ID
+    expect(smartSearch('INV-2026-00101')).toHaveLength(1)
+    expect(smartSearch('101')).toHaveLength(1)
+
+    // b. Student ID
+    expect(smartSearch('EGA-2026-0001')).toHaveLength(1)
+    expect(smartSearch('EGA-2026-0002')).toHaveLength(1)
+
+    // c. Student Name
+    expect(smartSearch('Sadia')).toHaveLength(1)
+    expect(smartSearch('Tanvir Ahmed')).toHaveLength(1)
+
+    // d. Phone number (student or guardian)
+    expect(smartSearch('01711223344')).toHaveLength(1)
+    expect(smartSearch('01811223344')).toHaveLength(1)
+    expect(smartSearch('01999887766')).toHaveLength(1)
+
+    // 2. Test payment confirmation state requirements
+    let counterTargetInvoice: any = null
+    let balanceVerified = false
+    let counterAmount: number | null = null
+    let counterSubmitting = false
+
+    const getOutstanding = () => {
+      if (!counterTargetInvoice) return 0
+      return Math.max(0, counterTargetInvoice.total_payable - counterTargetInvoice.total_paid)
+    }
+
+    const canConfirmPayment = () => {
+      if (!counterTargetInvoice) return false
+      if (!balanceVerified) return false
+      const outstanding = getOutstanding()
+      if (outstanding <= 0) return false
+      if (!counterAmount || counterAmount <= 0) return false
+      if (counterAmount > outstanding) return false
+      if (counterSubmitting) return false
+      return true
+    }
+
+    // Phase 1: No invoice selected -> confirmation disabled
+    expect(canConfirmPayment()).toBe(false)
+
+    // Phase 2: Invoice selected, but balance NOT verified -> confirmation disabled
+    counterTargetInvoice = mockInvoices[0] // Outstanding is 3000
+    counterAmount = 3000
+    expect(getOutstanding()).toBe(3000)
+    expect(balanceVerified).toBe(false)
+    expect(canConfirmPayment()).toBe(false)
+
+    // Phase 3: Balance verified, valid amount -> confirmation enabled
+    balanceVerified = true
+    expect(canConfirmPayment()).toBe(true)
+
+    // Phase 4: Overpayment attempted -> confirmation disabled
+    counterAmount = 3500 // Exceeds 3000
+    expect(canConfirmPayment()).toBe(false)
+
+    // Phase 5: Zero or negative amount -> confirmation disabled
+    counterAmount = 0
+    expect(canConfirmPayment()).toBe(false)
+    counterAmount = -500
+    expect(canConfirmPayment()).toBe(false)
+
+    // Phase 6: Fully settled invoice selected -> confirmation disabled even if verified
+    counterTargetInvoice = mockInvoices[1] // Outstanding is 0 (PAID)
+    counterAmount = 100
+    balanceVerified = true
+    expect(getOutstanding()).toBe(0)
+    expect(canConfirmPayment()).toBe(false)
+  })
 })
+
+

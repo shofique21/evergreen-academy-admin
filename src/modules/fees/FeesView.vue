@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
+import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
 import FormField from '@/components/common/FormField.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -25,7 +26,27 @@ import type {
 } from '@/types'
 
 const route = useRoute()
-const { notifySuccess, notifyError } = useNotification()
+const { notifySuccess, notifyError, notifyWarn } = useNotification()
+const authStore = useAuthStore()
+
+const isAccountant = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('super_admin') || roles.includes('admin') || userType === 'super_admin' || userType === 'admin') {
+    return false
+  }
+  return roles.includes('accountant') || userType === 'accountant'
+})
+
+const canSeedDemoMatrix = computed(() => {
+  if (isAccountant.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin'
+  )
+})
 
 // Extended Tabs to match 5-step finance management workflow
 type TabKey = 'structures' | 'categories' | 'assignments' | 'billing' | 'invoices' | 'counter' | 'reports'
@@ -122,7 +143,9 @@ const invoiceDetailVisible = ref(false)
 // Tab 6: Offline Counter Collection
 const counterInvoiceQuery = ref('')
 const counterSearching = ref(false)
+const counterSearchResults = ref<Invoice[]>([])
 const counterTargetInvoice = ref<Invoice | null>(null)
+const balanceVerified = ref(false)
 const counterAmount = ref<number | null>(null)
 const counterMethod = ref<'CASH_COUNTER' | 'BANK_DEPOSIT' | 'CHEQUE'>('CASH_COUNTER')
 const counterReference = ref('')
@@ -220,6 +243,10 @@ function handleSessionChange() {
 // Quick Demo Seeder
 // -------------------------------------------------------------
 async function handleSeedDemoMatrix() {
+  if (!canSeedDemoMatrix.value) {
+    notifyWarn('Access Restricted', 'Only administrators can load the demo pricing matrix.')
+    return
+  }
   try {
     seedingDemo.value = true
     const res = await api.post('/api/v1/finance/seed-demo')
@@ -574,22 +601,68 @@ async function handleInitiateOnlineCheckout() {
 // -------------------------------------------------------------
 // Tab 6: Offline Cashier Counter
 // -------------------------------------------------------------
+const targetInvoiceOutstanding = computed(() => {
+  if (!counterTargetInvoice.value) return 0
+  return Math.max(0, Number(counterTargetInvoice.value.total_payable) - Number(counterTargetInvoice.value.total_paid))
+})
+
+const canConfirmCounterPayment = computed(() => {
+  if (!counterTargetInvoice.value) return false
+  if (!balanceVerified.value) return false
+  if (targetInvoiceOutstanding.value <= 0) return false
+  if (!counterAmount.value || counterAmount.value <= 0) return false
+  if (counterAmount.value > targetInvoiceOutstanding.value) return false
+  if (counterSubmitting.value) return false
+  return true
+})
+
+function selectCounterInvoice(inv: Invoice) {
+  counterTargetInvoice.value = inv
+  balanceVerified.value = false
+  const outstanding = Math.max(0, Number(inv.total_payable) - Number(inv.total_paid))
+  counterAmount.value = outstanding > 0 ? Math.round(outstanding * 100) / 100 : 0
+}
+
+function clearCounterSelection() {
+  counterTargetInvoice.value = null
+  balanceVerified.value = false
+  counterAmount.value = null
+  counterReference.value = ''
+}
+
+function clearCounterSearch() {
+  counterInvoiceQuery.value = ''
+  counterSearchResults.value = []
+  counterTargetInvoice.value = null
+  balanceVerified.value = false
+  counterAmount.value = null
+  counterReference.value = ''
+}
+
+function setCounterSearchExample(example: string) {
+  counterInvoiceQuery.value = example
+  searchCounterInvoice()
+}
+
 async function searchCounterInvoice() {
   if (!counterInvoiceQuery.value.trim()) return
   try {
     counterSearching.value = true
+    counterSearchResults.value = []
     counterTargetInvoice.value = null
+    balanceVerified.value = false
     const res = await api.get<{ data: Invoice[] }>('/api/v1/finance/invoices', {
-      params: { search: counterInvoiceQuery.value.trim(), per_page: 5 },
+      params: { search: counterInvoiceQuery.value.trim(), per_page: 15 },
     })
     const found = res.data?.data || []
-    if (found.length > 0) {
-      counterTargetInvoice.value = found[0]
-      const outstanding = Number(counterTargetInvoice.value.total_payable) - Number(counterTargetInvoice.value.total_paid)
-      counterAmount.value = outstanding > 0 ? outstanding : 0
-      notifySuccess('Invoice Found', `Loaded bill #${counterTargetInvoice.value.invoice_number}`)
+    counterSearchResults.value = found
+    if (found.length === 1) {
+      selectCounterInvoice(found[0])
+      notifySuccess('Invoice Found', `Loaded bill #${found[0].invoice_number}. Please verify balance before confirming payment.`)
+    } else if (found.length > 1) {
+      notifySuccess('Invoices Found', `Found ${found.length} matching invoices. Please select an invoice below.`)
     } else {
-      notifyError('Not Found', 'No invoice matched query or student UID.')
+      notifyError('No Invoices Found', `No invoice matched "${counterInvoiceQuery.value}". Please check Invoice ID, Student ID, Name, or Phone.`)
     }
   } catch (err: any) {
     notifyError('Search Failed', err.response?.data?.message || err.message)
@@ -599,13 +672,20 @@ async function searchCounterInvoice() {
 }
 
 async function handleCollectPayment() {
-  if (!counterTargetInvoice.value) return
+  if (!counterTargetInvoice.value) {
+    notifyWarn('Invoice Selection Required', 'Please select an invoice from the search results first.')
+    return
+  }
+  if (!balanceVerified.value) {
+    notifyWarn('Balance Verification Required', 'Please confirm that you have verified the outstanding balance before collecting payment.')
+    return
+  }
   if (!counterAmount.value || counterAmount.value <= 0) {
     notifyError('Invalid Amount', 'Please provide a valid payment collection amount.')
     return
   }
 
-  const outstanding = Number(counterTargetInvoice.value.total_payable) - Number(counterTargetInvoice.value.total_paid)
+  const outstanding = targetInvoiceOutstanding.value
   if (counterAmount.value > outstanding) {
     notifyError('Overpayment Prevented', `Maximum allowed collection is remaining balance ৳ ${outstanding.toFixed(2)}.`)
     return
@@ -613,20 +693,32 @@ async function handleCollectPayment() {
 
   try {
     counterSubmitting.value = true
-    const res = await api.post('/api/v1/finance/payments/collect', {
-      invoice_id: counterTargetInvoice.value.id,
-      amount: counterAmount.value,
-      payment_method: counterMethod.value,
-      reference_no: counterReference.value || undefined,
-    })
+    const idempotencyKey = `PAY-OFFLINE-${counterTargetInvoice.value.id}-${counterAmount.value}-${Date.now()}`
+    const res = await api.post(
+      '/api/v1/finance/payments/collect',
+      {
+        invoice_id: counterTargetInvoice.value.id,
+        amount: counterAmount.value,
+        payment_method: counterMethod.value,
+        reference_no: counterReference.value || undefined,
+        idempotency_key: idempotencyKey,
+      },
+      {
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      }
+    )
 
     lastReceipt.value = res.data?.data || null
     notifySuccess('Payment Settled', `Receipt #${res.data?.data?.receipt_number || 'Confirmed'} issued.`)
     receiptModalVisible.value = true
     counterTargetInvoice.value = null
+    balanceVerified.value = false
     counterAmount.value = null
     counterReference.value = ''
     counterInvoiceQuery.value = ''
+    counterSearchResults.value = []
     await fetchInvoices()
   } catch (err: any) {
     notifyError('Collection Error', err.response?.data?.message || err.message)
@@ -713,6 +805,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
       <template #actions>
         <div class="header-action-group">
           <Button
+            v-if="canSeedDemoMatrix"
             label="🌱 Load Demo Pricing Matrix"
             icon="pi pi-database"
             severity="secondary"
@@ -955,7 +1048,8 @@ function formatCurrency(amount: number | string | null | undefined): string {
             <tr v-if="structureMatrix.length === 0">
               <td :colspan="4 + classes.length" class="empty-state-cell">
                 <i class="pi pi-info-circle empty-icon"></i>
-                <p>No fee structures configured for this academic session. Click "Load Demo Pricing Matrix" above to populate!</p>
+                <p v-if="canSeedDemoMatrix">No fee structures configured for this academic session. Click "Load Demo Pricing Matrix" above to populate!</p>
+                <p v-else>No fee structures configured for this academic session. Please configure fee categories and class structures.</p>
               </td>
             </tr>
           </tbody>
@@ -1502,67 +1596,271 @@ function formatCurrency(amount: number | string | null | undefined): string {
         <div>
           <h2 class="section-title">Cashier Counter Collection</h2>
           <p class="section-desc">
-            Accept Cash, Bank Deposit, or Cheque payments from students/guardians and issue official receipts.
+            Unified smart search by Invoice ID, Student ID, Name, or Phone. Select target invoice, verify outstanding balance, and collect payments with instant receipt generation.
           </p>
         </div>
 
-        <!-- SEARCH INVOICE -->
-        <div class="form-group">
-          <label class="form-label">Scan or Enter Invoice Number / Student UID</label>
-          <div class="flex-center-gap">
-            <InputText
-              v-model="counterInvoiceQuery"
-              placeholder="e.g. INV-2026-00001 or STU-2026-0001"
-              class="full-width font-mono"
-              @keyup.enter="searchCounterInvoice"
-            />
+        <!-- SINGLE SMART SEARCH BOX AT THE TOP -->
+        <div class="form-group smart-search-container">
+          <label class="form-label smart-search-label">
+            <i class="pi pi-search text-emerald"></i>
+            <span>Smart Invoice & Student Search</span>
+          </label>
+          <div class="smart-search-bar">
+            <div class="smart-search-input-wrap">
+              <i class="pi pi-search search-lens-icon"></i>
+              <InputText
+                v-model="counterInvoiceQuery"
+                placeholder="Enter Invoice # (INV-...), Student ID (EGA-...), Student Name, or Phone..."
+                class="full-width smart-search-input font-mono"
+                @keyup.enter="searchCounterInvoice"
+              />
+              <button
+                v-if="counterInvoiceQuery"
+                type="button"
+                class="search-clear-btn"
+                title="Clear Search"
+                @click="clearCounterSearch"
+              >
+                <i class="pi pi-times"></i>
+              </button>
+            </div>
             <Button
               label="Lookup"
               icon="pi pi-search"
+              severity="primary"
               :loading="counterSearching"
               @click="searchCounterInvoice"
             />
           </div>
+          <!-- Quick search tag hints -->
+          <div class="search-hint-row">
+            <span class="hint-label">Quick search support:</span>
+            <span class="search-hint-chip" @click="setCounterSearchExample('INV-2026')">
+              <i class="pi pi-receipt"></i> Invoice ID
+            </span>
+            <span class="search-hint-chip" @click="setCounterSearchExample('EGA-2026')">
+              <i class="pi pi-id-card"></i> Student ID
+            </span>
+            <span class="search-hint-chip" @click="setCounterSearchExample('Sadia')">
+              <i class="pi pi-user"></i> Student Name
+            </span>
+            <span class="search-hint-chip" @click="setCounterSearchExample('017')">
+              <i class="pi pi-phone"></i> Phone Number
+            </span>
+          </div>
         </div>
 
-        <!-- TARGET INVOICE CARD -->
+        <!-- SEARCH RESULTS LIST: INTERACTIVE INVOICE SELECTION -->
+        <div v-if="counterSearchResults.length > 0" class="search-results-panel">
+          <div class="results-header">
+            <span class="results-title">
+              Matching Invoices ({{ counterSearchResults.length }})
+            </span>
+            <span class="results-instruction text-xs text-muted">
+              Select an invoice below to verify balance and collect counter payment
+            </span>
+          </div>
+
+          <div class="results-grid">
+            <div
+              v-for="inv in counterSearchResults"
+              :key="inv.id"
+              class="result-item-card"
+              :class="{ selected: counterTargetInvoice?.id === inv.id }"
+              @click="selectCounterInvoice(inv)"
+            >
+              <div class="result-card-top">
+                <div class="result-inv-number font-mono font-bold">
+                  {{ inv.invoice_number }}
+                </div>
+                <StatusBadge :status="inv.status" />
+              </div>
+
+              <div class="result-student-info">
+                <strong class="student-name text-dark">
+                  {{ inv.student?.first_name }} {{ inv.student?.last_name }}
+                </strong>
+                <span class="student-meta font-mono text-muted text-xs">
+                  UID: {{ inv.student?.student_uid || 'N/A' }}
+                  <span v-if="inv.student?.currentEnrollment?.classLevel?.name || inv.student?.current_enrollment?.class_level?.name">
+                    • Class {{ inv.student?.currentEnrollment?.classLevel?.name || inv.student?.current_enrollment?.class_level?.name }}
+                  </span>
+                </span>
+                <span v-if="inv.student?.emergency_phone || inv.student?.user?.phone || inv.student?.guardians?.[0]?.phone" class="phone-meta text-xs text-slate-500">
+                  <i class="pi pi-phone"></i> {{ inv.student?.emergency_phone || inv.student?.user?.phone || inv.student?.guardians?.[0]?.phone }}
+                </span>
+              </div>
+
+              <div class="result-financials">
+                <div class="financial-due-pill">
+                  <span class="due-label">Due:</span>
+                  <strong class="due-amount" :class="Number(inv.total_payable) - Number(inv.total_paid) > 0 ? 'text-amber' : 'text-emerald'">
+                    {{ formatCurrency(Math.max(0, Number(inv.total_payable) - Number(inv.total_paid))) }}
+                  </strong>
+                </div>
+                <Button
+                  :label="counterTargetInvoice?.id === inv.id ? 'Selected' : 'Select Invoice'"
+                  :icon="counterTargetInvoice?.id === inv.id ? 'pi pi-check' : 'pi pi-arrow-right'"
+                  :severity="counterTargetInvoice?.id === inv.id ? 'success' : 'primary'"
+                  :outlined="counterTargetInvoice?.id !== inv.id"
+                  size="small"
+                  class="select-inv-btn"
+                  @click.stop="selectCounterInvoice(inv)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- EMPTY SELECTION PROMPT (WHEN NO INVOICE IS SELECTED YET) -->
+        <div v-if="!counterTargetInvoice && counterSearchResults.length === 0 && !counterSearching" class="empty-selection-placeholder">
+          <i class="pi pi-receipt placeholder-icon"></i>
+          <h4 class="font-bold text-dark">No Invoice Selected</h4>
+          <p class="text-xs text-muted">
+            Enter an Invoice #, Student ID, Name, or Phone above and click Lookup to load the bill and verify balance.
+          </p>
+        </div>
+
+        <!-- TARGET INVOICE CARD & BALANCE VERIFICATION -->
         <div v-if="counterTargetInvoice" class="counter-invoice-card">
           <div class="counter-invoice-header">
             <div>
-              <span class="code-subtext">Bill Number</span>
+              <div class="flex-align-gap mb-1">
+                <span class="code-subtext">Selected Bill</span>
+                <Tag value="Active Target" severity="info" />
+              </div>
               <h3 class="font-bold text-dark text-lg font-mono">{{ counterTargetInvoice.invoice_number }}</h3>
-              <span class="text-xs text-muted block">
-                {{ counterTargetInvoice.student?.first_name }} {{ counterTargetInvoice.student?.last_name }} ({{ counterTargetInvoice.student?.student_uid }})
-              </span>
+              <div class="student-profile-strip">
+                <i class="pi pi-user text-primary"></i>
+                <span class="font-semibold text-dark">
+                  {{ counterTargetInvoice.student?.first_name }} {{ counterTargetInvoice.student?.last_name }}
+                </span>
+                <span class="text-xs text-muted font-mono">
+                  ({{ counterTargetInvoice.student?.student_uid }})
+                </span>
+                <span v-if="counterTargetInvoice.student?.currentEnrollment?.classLevel?.name || counterTargetInvoice.student?.current_enrollment?.class_level?.name" class="class-badge-pill">
+                  Class: {{ counterTargetInvoice.student?.currentEnrollment?.classLevel?.name || counterTargetInvoice.student?.current_enrollment?.class_level?.name }}
+                </span>
+                <span v-if="counterTargetInvoice.student?.emergency_phone || counterTargetInvoice.student?.user?.phone || counterTargetInvoice.student?.guardians?.[0]?.phone" class="phone-badge-pill">
+                  📞 {{ counterTargetInvoice.student?.emergency_phone || counterTargetInvoice.student?.user?.phone || counterTargetInvoice.student?.guardians?.[0]?.phone }}
+                </span>
+              </div>
             </div>
-            <StatusBadge :status="counterTargetInvoice.status" />
+            <div class="header-right-stack">
+              <StatusBadge :status="counterTargetInvoice.status" />
+              <button
+                type="button"
+                class="deselect-btn"
+                @click="clearCounterSelection"
+                title="Deselect invoice"
+              >
+                Change Invoice
+              </button>
+            </div>
           </div>
 
+          <!-- FINANCIAL BALANCE LEDGER -->
           <div class="stat-mini-grid">
-            <div>
-              <span class="meta-label">Total Billed</span>
-              <span class="meta-val">{{ formatCurrency(counterTargetInvoice.total_payable) }}</span>
+            <div class="stat-cell">
+              <span class="meta-label">Total Invoiced</span>
+              <span class="meta-val font-semibold">{{ formatCurrency(counterTargetInvoice.total_payable) }}</span>
             </div>
-            <div>
+            <div class="stat-cell">
               <span class="meta-label">Paid So Far</span>
-              <span class="meta-val text-emerald">{{ formatCurrency(counterTargetInvoice.total_paid) }}</span>
+              <span class="meta-val text-emerald font-semibold">{{ formatCurrency(counterTargetInvoice.total_paid) }}</span>
             </div>
-            <div>
-              <span class="meta-label">Outstanding Due</span>
-              <span class="meta-val text-amber font-bold">
-                {{ formatCurrency(Number(counterTargetInvoice.total_payable) - Number(counterTargetInvoice.total_paid)) }}
+            <div class="stat-cell balance-highlight-cell">
+              <span class="meta-label">Outstanding Balance</span>
+              <span class="meta-val text-amber font-bold text-base">
+                {{ formatCurrency(targetInvoiceOutstanding) }}
               </span>
             </div>
           </div>
 
-          <div class="counter-form-stack">
-            <FormField label="Collection Amount (BDT)">
-              <InputText
-                v-model.number="counterAmount"
-                type="number"
-                step="0.01"
-                class="full-width font-mono text-emerald font-bold"
+          <!-- SETTLED INVOICE NOTICE -->
+          <div v-if="targetInvoiceOutstanding <= 0" class="settled-alert">
+            <i class="pi pi-check-circle text-emerald text-lg"></i>
+            <div>
+              <strong class="text-emerald">Invoice Fully Settled</strong>
+              <p class="text-xs text-muted">This invoice has no outstanding balance (৳ 0). No further counter payments are required.</p>
+            </div>
+          </div>
+
+          <!-- MANDATORY BALANCE VERIFICATION STEP -->
+          <div v-else class="balance-verification-card" :class="{ verified: balanceVerified }">
+            <div class="verification-top">
+              <div class="verification-title-row">
+                <i :class="balanceVerified ? 'pi pi-check-circle text-emerald' : 'pi pi-shield text-amber'"></i>
+                <h4 class="verification-title font-bold">
+                  {{ balanceVerified ? 'Balance Confirmed & Verified' : 'Mandatory Balance Verification' }}
+                </h4>
+              </div>
+              <Tag
+                :value="balanceVerified ? 'VERIFIED' : 'ACTION REQUIRED'"
+                :severity="balanceVerified ? 'success' : 'warn'"
               />
+            </div>
+
+            <p class="verification-explainer">
+              To prevent financial discrepancies, please verify the student identity and confirm the outstanding balance before entering cash collection.
+            </p>
+
+            <label class="verification-checkbox-box">
+              <input
+                type="checkbox"
+                v-model="balanceVerified"
+                class="verification-checkbox"
+                id="counter-balance-verified-checkbox"
+              />
+              <span class="verification-label-text">
+                I have verified student
+                <strong>{{ counterTargetInvoice.student?.first_name }} {{ counterTargetInvoice.student?.last_name }}</strong>
+                (ID: <code>{{ counterTargetInvoice.student?.student_uid }}</code>) and confirmed the outstanding balance of
+                <strong class="text-amber">{{ formatCurrency(targetInvoiceOutstanding) }}</strong> with payer.
+              </span>
+            </label>
+          </div>
+
+          <!-- COLLECTION PAYMENT FORM -->
+          <div v-if="targetInvoiceOutstanding > 0" class="counter-form-stack" :class="{ 'form-dimmed': !balanceVerified }">
+            <FormField label="Collection Amount (BDT)">
+              <div class="amount-field-container">
+                <InputText
+                  v-model.number="counterAmount"
+                  type="number"
+                  step="0.01"
+                  class="full-width font-mono text-emerald font-bold"
+                  :disabled="!balanceVerified"
+                />
+                <div v-if="balanceVerified" class="quick-preset-chips">
+                  <button
+                    type="button"
+                    class="preset-amount-chip"
+                    @click="counterAmount = targetInvoiceOutstanding"
+                  >
+                    Pay Full ({{ formatCurrency(targetInvoiceOutstanding) }})
+                  </button>
+                  <button
+                    v-if="targetInvoiceOutstanding > 500"
+                    type="button"
+                    class="preset-amount-chip"
+                    @click="counterAmount = Math.round(targetInvoiceOutstanding / 2)"
+                  >
+                    Pay 50% ({{ formatCurrency(Math.round(targetInvoiceOutstanding / 2)) }})
+                  </button>
+                </div>
+              </div>
+
+              <!-- Overpayment or invalid amount validation feedback -->
+              <small v-if="counterAmount && counterAmount > targetInvoiceOutstanding" class="amount-error text-danger">
+                <i class="pi pi-exclamation-triangle"></i>
+                Overpayment prevented: Amount cannot exceed remaining balance of {{ formatCurrency(targetInvoiceOutstanding) }}.
+              </small>
+              <small v-else-if="counterAmount && counterAmount > 0" class="amount-helper text-emerald">
+                <i class="pi pi-info-circle"></i>
+                Remaining balance after this payment: {{ formatCurrency(Math.max(0, targetInvoiceOutstanding - counterAmount)) }}
+              </small>
             </FormField>
 
             <FormField label="Payment Method">
@@ -1571,6 +1869,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                   type="button"
                   class="method-btn"
                   :class="{ active: counterMethod === 'CASH_COUNTER' }"
+                  :disabled="!balanceVerified"
                   @click="counterMethod = 'CASH_COUNTER'"
                 >
                   <i class="pi pi-wallet"></i>
@@ -1580,6 +1879,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                   type="button"
                   class="method-btn"
                   :class="{ active: counterMethod === 'BANK_DEPOSIT' }"
+                  :disabled="!balanceVerified"
                   @click="counterMethod = 'BANK_DEPOSIT'"
                 >
                   <i class="pi pi-building"></i>
@@ -1589,6 +1889,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
                   type="button"
                   class="method-btn"
                   :class="{ active: counterMethod === 'CHEQUE' }"
+                  :disabled="!balanceVerified"
                   @click="counterMethod = 'CHEQUE'"
                 >
                   <i class="pi pi-file"></i>
@@ -1597,23 +1898,31 @@ function formatCurrency(amount: number | string | null | undefined): string {
               </div>
             </FormField>
 
-            <FormField label="Transaction / Deposit Slip Ref (Optional)">
+            <FormField label="Transaction / Deposit Slip Ref (Optional for Cash, Required for Bank/Cheque)">
               <InputText
                 v-model="counterReference"
-                placeholder="Bank scroll or receipt number..."
+                placeholder="Bank scroll or cheque number..."
                 class="full-width font-mono"
+                :disabled="!balanceVerified"
               />
             </FormField>
 
-            <Button
-              label="Confirm Collection & Generate Receipt"
-              icon="pi pi-check"
-              class="full-width"
-              size="large"
-              severity="success"
-              :loading="counterSubmitting"
-              @click="handleCollectPayment"
-            />
+            <!-- CONFIRM BUTTON WITH VERIFICATION LOCK -->
+            <div class="confirm-action-wrap">
+              <Button
+                label="Confirm Collection & Generate Receipt"
+                icon="pi pi-check"
+                class="full-width confirm-collect-btn"
+                size="large"
+                severity="success"
+                :disabled="!canConfirmCounterPayment"
+                :loading="counterSubmitting"
+                @click="handleCollectPayment"
+              />
+              <p v-if="!balanceVerified" class="verification-reminder-text">
+                <i class="pi pi-lock"></i> Balance verification required before confirming payment.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -2667,25 +2976,230 @@ function formatCurrency(amount: number | string | null | undefined): string {
   border-radius: 1rem;
   border: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-  max-width: 42rem;
+  max-width: 48rem;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
 
-.form-group {
+.smart-search-container {
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 0.875rem;
+  border: 1px solid #e2e8f0;
+}
+
+.smart-search-label {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 0.375rem;
+}
+
+.smart-search-bar {
+  display: flex;
   gap: 0.5rem;
 }
 
-.form-label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #334155;
+.smart-search-input-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
 }
 
+.search-lens-icon {
+  position: absolute;
+  left: 0.875rem;
+  color: #94a3b8;
+  font-size: 0.875rem;
+  pointer-events: none;
+}
+
+.smart-search-input {
+  padding-left: 2.25rem !important;
+  padding-right: 2rem !important;
+  font-size: 0.875rem;
+  border-radius: 0.625rem;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.search-clear-btn:hover {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.search-hint-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.hint-label {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.search-hint-chip {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: all 0.15s ease;
+}
+
+.search-hint-chip:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+/* Search results panel */
+.search-results-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 0.375rem;
+}
+
+.results-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.625rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.result-item-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.result-item-card:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.08);
+}
+
+.result-item-card.selected {
+  border-color: #10b981;
+  background: #f0fdf4;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.result-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.result-inv-number {
+  font-size: 0.875rem;
+  color: #1e293b;
+}
+
+.result-student-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.student-name {
+  font-size: 0.875rem;
+}
+
+.phone-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.result-financials {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.375rem;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.financial-due-pill {
+  font-size: 0.8125rem;
+}
+
+.due-label {
+  color: #64748b;
+  margin-right: 0.25rem;
+}
+
+.due-amount {
+  font-size: 0.9375rem;
+}
+
+/* Empty selection placeholder */
+.empty-selection-placeholder {
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  border: 2px dashed #cbd5e1;
+  border-radius: 1rem;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.placeholder-icon {
+  font-size: 2.5rem;
+  color: #94a3b8;
+  margin-bottom: 0.25rem;
+}
+
+/* Target invoice card */
 .counter-invoice-card {
   background: #f8fafc;
   padding: 1.25rem;
@@ -2693,7 +3207,7 @@ function formatCurrency(amount: number | string | null | undefined): string {
   border: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.125rem;
 }
 
 .counter-invoice-header {
@@ -2704,6 +3218,46 @@ function formatCurrency(amount: number | string | null | undefined): string {
   padding-bottom: 0.75rem;
 }
 
+.student-profile-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.class-badge-pill, .phone-badge-pill {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+.header-right-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.deselect-btn {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.deselect-btn:hover {
+  color: #1d4ed8;
+}
+
 .stat-mini-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2711,11 +3265,158 @@ function formatCurrency(amount: number | string | null | undefined): string {
   font-size: 0.75rem;
 }
 
+.stat-cell {
+  background: #ffffff;
+  padding: 0.75rem;
+  border-radius: 0.625rem;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.balance-highlight-cell {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.settled-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 0.875rem 1rem;
+  border-radius: 0.75rem;
+}
+
+/* Balance verification card */
+.balance-verification-card {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  transition: all 0.2s ease;
+}
+
+.balance-verification-card.verified {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.verification-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.verification-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.verification-title {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #1e293b;
+}
+
+.verification-explainer {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.verification-checkbox-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.balance-verification-card.verified .verification-checkbox-box {
+  border-color: #86efac;
+}
+
+.verification-checkbox {
+  margin-top: 0.125rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  accent-color: #10b981;
+  cursor: pointer;
+}
+
+.verification-label-text {
+  font-size: 0.8125rem;
+  color: #1e293b;
+  line-height: 1.4;
+}
+
+/* Collection form */
 .counter-form-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 1rem;
   padding-top: 0.5rem;
+  transition: opacity 0.2s ease;
+}
+
+.form-dimmed {
+  opacity: 0.5;
+}
+
+.amount-field-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.quick-preset-chips {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.preset-amount-chip {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.preset-amount-chip:hover {
+  background: #d1fae5;
+}
+
+.amount-error {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #ef4444;
+  margin-top: 0.25rem;
+}
+
+.amount-helper {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #10b981;
+  margin-top: 0.25rem;
 }
 
 .method-btn-grid {
@@ -2745,6 +3446,22 @@ function formatCurrency(amount: number | string | null | undefined): string {
   background: #ecfdf5;
   color: #047857;
   font-weight: 800;
+}
+
+.confirm-action-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.verification-reminder-text {
+  font-size: 0.75rem;
+  color: #b45309;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
 }
 
 /* =========================================================

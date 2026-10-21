@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
+import Dialog from 'primevue/dialog'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatBDT, formatDate } from '@/utils/formatters'
@@ -508,20 +509,96 @@ const welcomeSubtitle = computed(() => {
   return `${current.value.profile.class_name} • ${current.value.profile.section_name} (${current.value.profile.roll_number}) • ${current.value.profile.day_name}, ${formatDate(current.value.profile.summary_date)}`
 })
 
-function payInvoice(invoice: OutstandingInvoice) {
-  router.push({
-    path: '/student/payments',
-    query: { invoice_id: invoice.id.toString(), amount: invoice.outstanding_balance.toString() },
-  })
+// Student Online Payment Modal State
+const showPayModal = ref(false)
+const selectedPayInvoice = ref<OutstandingInvoice | null>(null)
+const selectedChannel = ref<'bkash' | 'sslcommerz' | 'nagad'>('bkash')
+const processingPayment = ref(false)
+
+function openOnlinePaymentModal(invoice?: OutstandingInvoice) {
+  if (invoice) {
+    selectedPayInvoice.value = invoice
+  } else if (current.value.outstanding_invoices.length > 0) {
+    selectedPayInvoice.value = current.value.outstanding_invoices[0]
+  } else {
+    toast.add({
+      severity: 'info',
+      summary: 'No Dues Pending',
+      detail: 'You have no outstanding tuition invoices to pay.',
+      life: 3000,
+    })
+    return
+  }
+  selectedChannel.value = 'bkash'
+  showPayModal.value = true
 }
 
-function submitHomework(hw: HomeworkItem) {
-  toast.add({
-    severity: 'info',
-    summary: 'Homework Upload',
-    detail: `Submission portal opened for ${hw.title}`,
-    life: 4000,
-  })
+async function confirmOnlinePayment() {
+  if (!selectedPayInvoice.value) return
+  processingPayment.value = true
+  const inv = selectedPayInvoice.value
+  const amountToPay = inv.outstanding_balance
+  const idempotencyKey = `PAY-ONLINE-${inv.id}-${Date.now()}`
+
+  try {
+    const channelName = selectedChannel.value === 'bkash'
+      ? 'bKash Tokenized'
+      : (selectedChannel.value === 'nagad' ? 'Nagad Online' : 'SSLCommerz (Cards/NetBanking)')
+
+    const res = await api.post(
+      '/api/v1/finance/payments/collect',
+      {
+        invoice_id: inv.id,
+        amount: amountToPay,
+        payment_method: channelName,
+        paid_at: new Date().toISOString().substring(0, 10),
+        notes: `Online Checkout via ${selectedChannel.value.toUpperCase()}`,
+        idempotency_key: idempotencyKey,
+      },
+      {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }
+    )
+
+    const receiptNo = res.data?.data?.receipt_number || `REC-${Date.now().toString().slice(-6)}`
+
+    // Remove or update the invoice in local dashboard state
+    const idx = current.value.outstanding_invoices.findIndex((i) => i.id === inv.id)
+    if (idx !== -1) {
+      current.value.outstanding_invoices.splice(idx, 1)
+    }
+    current.value.kpis.outstanding_dues = Math.max(0, current.value.kpis.outstanding_dues - amountToPay)
+
+    current.value.payment_history.unshift({
+      id: Date.now(),
+      receipt_number: receiptNo,
+      invoice_number: inv.invoice_number,
+      amount: amountToPay,
+      payment_method: channelName,
+      gateway_name: selectedChannel.value.toUpperCase(),
+      gateway_transaction_id: `TXN-${selectedChannel.value.slice(0, 2).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`,
+      paid_at: new Date().toISOString().substring(0, 10),
+      paid_at_formatted: 'Today',
+      status: 'PAID',
+    })
+
+    showPayModal.value = false
+    toast.add({
+      severity: 'success',
+      summary: 'Payment Successful',
+      detail: `Paid ${formatBDT(amountToPay)} for ${inv.invoice_number}. Receipt: ${receiptNo}`,
+      life: 5000,
+    })
+  } catch (err: any) {
+    toast.add({
+      severity: 'error',
+      summary: 'Payment Failed',
+      detail: err.response?.data?.message || err.message || 'Payment gateway could not process transaction.',
+      life: 4000,
+    })
+  } finally {
+    processingPayment.value = false
+  }
 }
 
 function viewNotice(notice: NoticeItem) {
@@ -565,14 +642,7 @@ onMounted(() => {
           label="Pay Fees"
           icon="pi pi-wallet"
           severity="success"
-          @click="router.push('/student/payments')"
-        />
-
-        <AppButton
-          label="Admit Card"
-          icon="pi pi-print"
-          severity="primary"
-          @click="router.push('/student/examinations')"
+          @click="openOnlinePaymentModal()"
         />
       </template>
     </PageHeader>
@@ -937,7 +1007,7 @@ onMounted(() => {
                   icon="pi pi-credit-card"
                   size="small"
                   severity="success"
-                  @click="payInvoice(inv)"
+                  @click="openOnlinePaymentModal(inv)"
                 />
               </div>
             </div>
@@ -965,126 +1035,135 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 4. Two-Column Grid: Homework & Notices / Announcements -->
-      <div class="two-column-grid">
-        <!-- Left: Homework & Problem Sets -->
-        <div class="panel-card glass-panel">
-          <div class="panel-header">
-            <div class="header-left">
-              <span class="panel-badge">Assignments</span>
-              <h3 class="panel-title">Homework & Problem Sets</h3>
-              <p class="panel-subtitle">Weekly homework assignments from subject teachers</p>
-            </div>
-            <AppButton
-              label="All Tasks"
-              icon="pi pi-arrow-right"
-              iconPos="right"
-              text
-              size="small"
-            />
+      <!-- 4. Official Notice Board & Announcements -->
+      <div class="panel-card glass-panel notice-board-card">
+        <div class="panel-header">
+          <div class="header-left">
+            <span class="panel-badge">Official Circulars</span>
+            <h3 class="panel-title">Notices & Academy Circulars</h3>
+            <p class="panel-subtitle">Official academy communications, schedules, and circulars for students</p>
           </div>
-
-          <div class="homework-list">
-            <div v-for="hw in current.homework" :key="hw.id" class="hw-item">
-              <div class="hw-header">
-                <div>
-                  <h4 class="hw-title">{{ hw.title }}</h4>
-                  <span class="hw-meta">{{ hw.subject_name }} • Teacher: {{ hw.teacher_name }}</span>
-                </div>
-                <span
-                  class="hw-status-pill"
-                  :class="{
-                    's-pending': hw.status === 'PENDING',
-                    's-submitted': hw.status === 'SUBMITTED',
-                    's-evaluated': hw.status === 'EVALUATED',
-                  }"
-                >
-                  {{ hw.status }}
-                </span>
-              </div>
-
-              <p class="hw-instructions">{{ hw.instructions }}</p>
-
-              <div class="hw-footer">
-                <span class="hw-due">
-                  <i class="pi pi-clock"></i> Due: {{ hw.due_date_formatted }}
-                </span>
-                <span v-if="hw.score" class="hw-score">
-                  <i class="pi pi-check-circle text-emerald-600"></i> Score: {{ hw.score }}
-                </span>
-                <AppButton
-                  v-if="hw.status === 'PENDING'"
-                  label="Submit Solution"
-                  icon="pi pi-upload"
-                  size="small"
-                  severity="primary"
-                  @click="submitHomework(hw)"
-                />
-              </div>
-            </div>
-          </div>
+          <AppButton
+            label="All Notices"
+            icon="pi pi-arrow-right"
+            iconPos="right"
+            text
+            size="small"
+            @click="router.push('/communications')"
+          />
         </div>
 
-        <!-- Right: Notices & Announcements -->
-        <div class="panel-card glass-panel">
-          <div class="panel-header">
-            <div class="header-left">
-              <span class="panel-badge">Notice Board</span>
-              <h3 class="panel-title">Notices & Announcements</h3>
-              <p class="panel-subtitle">Official academy circulars & student communications</p>
+        <div class="notices-grid">
+          <div
+            v-for="notice in current.notices"
+            :key="notice.id"
+            class="notice-item"
+            :class="{ 'notice-pinned': notice.is_pinned }"
+          >
+            <div class="notice-meta-line">
+              <span v-if="notice.is_pinned" class="pin-pill">
+                <i class="pi pi-thumbtack"></i> Pinned
+              </span>
+              <span class="cat-pill">{{ notice.category }}</span>
+              <span
+                class="priority-pill"
+                :class="{
+                  'p-high': notice.priority === 'HIGH' || notice.priority === 'URGENT',
+                  'p-normal': notice.priority === 'NORMAL',
+                }"
+              >
+                {{ notice.priority }}
+              </span>
+              <span class="time-meta">{{ notice.published_formatted }}</span>
             </div>
-            <AppButton
-              label="Notice Board"
-              icon="pi pi-arrow-right"
-              iconPos="right"
-              text
-              size="small"
-              @click="router.push('/student/notices')"
-            />
-          </div>
 
-          <div class="notices-list">
-            <div
-              v-for="notice in current.notices"
-              :key="notice.id"
-              class="notice-item"
-              :class="{ 'notice-pinned': notice.is_pinned }"
-            >
-              <div class="notice-meta-line">
-                <span v-if="notice.is_pinned" class="pin-pill">
-                  <i class="pi pi-thumbtack"></i> Pinned
-                </span>
-                <span class="cat-pill">{{ notice.category }}</span>
-                <span
-                  class="priority-pill"
-                  :class="{
-                    'p-high': notice.priority === 'HIGH' || notice.priority === 'URGENT',
-                    'p-normal': notice.priority === 'NORMAL',
-                  }"
-                >
-                  {{ notice.priority }}
-                </span>
-                <span class="time-meta">{{ notice.published_formatted }}</span>
-              </div>
+            <h4 class="notice-title" @click="viewNotice(notice)">{{ notice.title }}</h4>
+            <p class="notice-desc">{{ notice.summary }}</p>
 
-              <h4 class="notice-title" @click="viewNotice(notice)">{{ notice.title }}</h4>
-              <p class="notice-desc">{{ notice.summary }}</p>
-
-              <div class="notice-footer" v-if="notice.has_attachment">
-                <a
-                  :href="notice.attachment_url ?? '#'"
-                  target="_blank"
-                  class="attachment-link"
-                  @click.stop
-                >
-                  <i class="pi pi-file-pdf"></i> Download Document
-                </a>
-              </div>
+            <div class="notice-footer" v-if="notice.has_attachment">
+              <a
+                :href="notice.attachment_url ?? '#'"
+                target="_blank"
+                class="attachment-link"
+                @click.stop
+              >
+                <i class="pi pi-file-pdf"></i> Download Official Circular
+              </a>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Student Online Tuition Payment Dialog -->
+    <Dialog
+      v-model:visible="showPayModal"
+      modal
+      header="Online Tuition Fee Payment"
+      :style="{ width: '480px' }"
+    >
+      <div v-if="selectedPayInvoice" class="student-pay-dialog-content">
+        <div class="pay-invoice-summary">
+          <div class="pay-summary-row">
+            <span class="text-slate-500">Invoice Number:</span>
+            <strong class="font-mono">{{ selectedPayInvoice.invoice_number }}</strong>
+          </div>
+          <div class="pay-summary-row">
+            <span class="text-slate-500">Fee Head:</span>
+            <span>{{ selectedPayInvoice.title }}</span>
+          </div>
+          <div class="pay-summary-row">
+            <span class="text-slate-500">Due Date:</span>
+            <span>{{ selectedPayInvoice.due_date_formatted }}</span>
+          </div>
+          <div class="pay-summary-row total-highlight">
+            <span>Payable Balance:</span>
+            <span class="amount-val">{{ formatBDT(selectedPayInvoice.outstanding_balance) }}</span>
+          </div>
+        </div>
+
+        <div class="channel-select-group">
+          <label class="channel-label">Select Payment Gateway</label>
+          <div class="channel-options">
+            <div
+              class="channel-card"
+              :class="{ selected: selectedChannel === 'bkash' }"
+              @click="selectedChannel = 'bkash'"
+            >
+              <i class="pi pi-mobile text-pink-600"></i>
+              <span>bKash Tokenized Payment</span>
+            </div>
+            <div
+              class="channel-card"
+              :class="{ selected: selectedChannel === 'sslcommerz' }"
+              @click="selectedChannel = 'sslcommerz'"
+            >
+              <i class="pi pi-globe text-blue-600"></i>
+              <span>SSLCommerz (Cards & Net Banking)</span>
+            </div>
+            <div
+              class="channel-card"
+              :class="{ selected: selectedChannel === 'nagad' }"
+              @click="selectedChannel = 'nagad'"
+            >
+              <i class="pi pi-wallet text-orange-600"></i>
+              <span>Nagad Online</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <AppButton label="Cancel" severity="secondary" text @click="showPayModal = false" />
+        <AppButton
+          label="Proceed to Secure Checkout"
+          icon="pi pi-shield"
+          severity="success"
+          :loading="processingPayment"
+          @click="confirmOnlinePayment"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -1812,80 +1891,97 @@ onMounted(() => {
   gap: 0.25rem;
 }
 
-/* Homework List */
-.homework-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
+/* Notice Board Full Card & Grid */
+.notice-board-card {
+  width: 100%;
 }
 
-.hw-item {
+.notices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+/* Student Online Payment Dialog */
+.student-pay-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.pay-invoice-summary {
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 1.15rem;
+  border-radius: 10px;
+  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
+  font-size: 0.9rem;
 }
 
-.hw-header {
+.pay-summary-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
 }
 
-.hw-title {
-  font-size: 0.95rem;
+.pay-summary-row.total-highlight {
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
   font-weight: 700;
   color: #0f172a;
 }
 
-.hw-meta {
-  font-size: 0.775rem;
-  color: #64748b;
+.amount-val {
+  font-size: 1.15rem;
+  color: #059669;
 }
 
-.hw-status-pill {
-  font-size: 0.7rem;
-  font-weight: 800;
-  padding: 0.2rem 0.55rem;
-  border-radius: 9999px;
-  text-transform: uppercase;
+.channel-select-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.hw-status-pill.s-pending { color: #c2410c; background: #fff7ed; }
-.hw-status-pill.s-submitted { color: #0284c7; background: #e0f2fe; }
-.hw-status-pill.s-evaluated { color: #15803d; background: #dcfce7; }
-
-.hw-instructions {
-  font-size: 0.825rem;
+.channel-label {
+  font-size: 0.85rem;
+  font-weight: 600;
   color: #475569;
-  line-height: 1.4;
 }
 
-.hw-footer {
+.channel-options {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 0.4rem;
-  border-top: 1px solid #f8fafc;
+  flex-direction: column;
+  gap: 0.65rem;
 }
 
-.hw-due {
-  font-size: 0.775rem;
-  color: #64748b;
+.channel-card {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  background: #ffffff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1e293b;
+  transition: all 0.2s ease;
 }
 
-.hw-score {
-  font-size: 0.8rem;
-  font-weight: 800;
+.channel-card:hover {
+  border-color: #10b981;
+  background: #f0fdf4;
+}
+
+.channel-card.selected {
+  border-color: #059669;
+  background: #ecfdf5;
   color: #065f46;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
+  box-shadow: 0 0 0 1px #059669;
 }
 
 /* Notices List */

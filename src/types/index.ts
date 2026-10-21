@@ -479,6 +479,15 @@ export interface StaffProfile {
   campus?: Campus
 }
 
+export interface StaffAttendanceLockInfo {
+  is_locked: boolean
+  locked_at?: string | null
+  locked_by?: string | null
+  locked_by_user_id?: number | null
+  remarks?: string | null
+  can_lock?: boolean
+}
+
 export interface StaffAttendanceItem {
   id?: number | null
   staff_profile_id: number
@@ -495,6 +504,7 @@ export interface StaffAttendanceItem {
   is_marked: boolean
   in_time?: string | null
   out_time?: string | null
+  is_locked?: boolean
 }
 
 export interface StaffAttendanceSummary {
@@ -507,6 +517,15 @@ export interface StaffAttendanceSummary {
   on_leave_count: number
   absent_count: number
   present_rate: number
+}
+
+export interface StaffAttendanceLockInfo {
+  is_locked: boolean
+  locked_at?: string | null
+  locked_by?: string | null
+  locked_by_user_id?: number | null
+  remarks?: string | null
+  can_lock?: boolean
 }
 
 // Admissions Pipeline Types

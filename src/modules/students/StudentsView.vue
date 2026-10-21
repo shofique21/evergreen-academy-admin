@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
+import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
@@ -77,6 +78,75 @@ interface AcademicSessionOption {
 }
 
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
+const authStore = useAuthStore()
+
+const isTeacher = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher'
+})
+
+const canPromote = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('students.promote') ||
+    authStore.hasPermission('students.manage')
+  )
+})
+
+const canGraduate = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('students.promote') ||
+    authStore.hasPermission('students.graduate') ||
+    authStore.hasPermission('students.manage')
+  )
+})
+
+const canTransfer = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('students.edit') ||
+    authStore.hasPermission('students.transfer') ||
+    authStore.hasPermission('students.manage')
+  )
+})
+
+const canWithdraw = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('students.edit') ||
+    authStore.hasPermission('students.withdraw') ||
+    authStore.hasPermission('students.manage')
+  )
+})
+
+const canChangeStatus = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('students.edit') ||
+    authStore.hasPermission('students.manage')
+  )
+})
 
 const students = ref<StudentRecord[]>([])
 const loading = ref(false)
@@ -432,6 +502,10 @@ async function handleAttachGuardian() {
 }
 
 function openTransferDialog(student: StudentRecord) {
+  if (!canTransfer.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to transfer students.')
+    return
+  }
   transferTargetStudent.value = student
   const currentClass = classesList.value.find((c) => c.name === student.enrollment?.class)
   transferSectionsList.value = currentClass?.sections || []
@@ -473,6 +547,10 @@ async function handleExecuteTransfer() {
 }
 
 function openWithdrawDialog(student: StudentRecord) {
+  if (!canWithdraw.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to withdraw students.')
+    return
+  }
   withdrawTargetStudent.value = student
   withdrawForm.value = {
     exit_date: new Date().toISOString().substring(0, 10),
@@ -506,6 +584,10 @@ async function handleExecuteWithdraw() {
 }
 
 function openStatusModal(student: StudentRecord) {
+  if (!canChangeStatus.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to modify student institutional status.')
+    return
+  }
   statusTargetStudent.value = student
   statusForm.value = {
     status: student.status || 'ACTIVE',
@@ -552,6 +634,10 @@ async function handleUpdateStatus() {
 }
 
 async function openPromoteDialog() {
+  if (!canPromote.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to perform student promotions.')
+    return
+  }
   promoteForm.value = {
     new_academic_year_id: academicYearsList.value[0]?.id || currentSessionId.value,
     target_class_id: classesList.value[1]?.id || '',
@@ -658,6 +744,10 @@ async function handleExecutePromotion() {
 }
 
 function openGraduateDialog() {
+  if (!canGraduate.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to graduate students.')
+    return
+  }
   graduateForm.value = {
     student_ids: students.value.filter((s) => s.status === 'ACTIVE').map((s) => s.id),
     graduation_date: new Date().toISOString().substring(0, 10),
@@ -740,6 +830,7 @@ onMounted(async () => {
           @click="admissionDialogVisible = true"
         />
         <Button
+          v-if="canPromote"
           label="Batch Promotion"
           icon="pi pi-arrow-circle-up"
           severity="help"
@@ -747,6 +838,7 @@ onMounted(async () => {
           @click="openPromoteDialog"
         />
         <Button
+          v-if="canGraduate"
           label="Graduation"
           icon="pi pi-graduation-cap"
           severity="secondary"
@@ -856,6 +948,7 @@ onMounted(async () => {
         <Column header="Status" style="width: 130px">
           <template #body="{ data }">
             <button
+              v-if="canChangeStatus"
               type="button"
               class="cursor-pointer border-0 bg-transparent p-0 transition-transform hover:scale-105"
               title="Click to change student institutional status"
@@ -863,6 +956,7 @@ onMounted(async () => {
             >
               <StatusBadge :status="data.status" showDot />
             </button>
+            <StatusBadge v-else :status="data.status" showDot />
           </template>
         </Column>
 
@@ -879,7 +973,7 @@ onMounted(async () => {
                 @click="handleViewStudent(data.id)"
               />
               <Button
-                v-if="data.status === 'ACTIVE'"
+                v-if="canTransfer && data.status === 'ACTIVE'"
                 icon="pi pi-arrows-h"
                 text
                 rounded
@@ -889,7 +983,7 @@ onMounted(async () => {
                 @click="openTransferDialog(data)"
               />
               <Button
-                v-if="data.status === 'ACTIVE'"
+                v-if="canWithdraw && data.status === 'ACTIVE'"
                 icon="pi pi-user-minus"
                 text
                 rounded
@@ -925,6 +1019,7 @@ onMounted(async () => {
                 <i class="pi pi-copy text-[10px] mr-1"></i>{{ selectedStudent.student_uid }}
               </span>
               <button
+                v-if="canChangeStatus"
                 type="button"
                 class="group inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg hover:bg-slate-100 border border-slate-200/80 hover:border-slate-300 transition-all cursor-pointer"
                 title="Click to change student institutional status"
@@ -933,6 +1028,7 @@ onMounted(async () => {
                 <StatusBadge :status="selectedStudent.status" size="small" showDot />
                 <span class="text-[10px] text-slate-500 group-hover:text-slate-900 font-semibold uppercase">Change</span>
               </button>
+              <StatusBadge v-else :status="selectedStudent.status" size="small" showDot />
             </div>
             <p class="modal-subtitle text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>Official SIS Student Dossier</span>
@@ -1057,6 +1153,7 @@ onMounted(async () => {
               <span class="data-val flex items-center gap-2">
                 <StatusBadge :status="selectedStudent.status" size="small" showDot />
                 <button
+                  v-if="canChangeStatus"
                   type="button"
                   class="text-xs text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 hover:underline cursor-pointer"
                   @click="openStatusModal(selectedStudent)"
@@ -1292,6 +1389,7 @@ onMounted(async () => {
           </div>
           <div class="flex items-center gap-2.5">
             <Button
+              v-if="canChangeStatus"
               label="Change Status"
               icon="pi pi-user-edit"
               severity="warn"

@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
+import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
 import FormField from '@/components/common/FormField.vue'
 import Button from 'primevue/button'
@@ -10,6 +11,27 @@ import Tag from 'primevue/tag'
 import type { TimetableSlot, TimetableVersion, Period, ClassLevel, Section, Subject, Classroom, Teacher } from '@/types'
 
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
+const authStore = useAuthStore()
+
+const isTeacher = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher'
+})
+
+const canManageTimetable = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('timetable.manage')
+  )
+})
 
 // Views & Loading
 const activeTab = ref<'mixGrid' | 'sectionGrid' | 'teacherMatrix' | 'versions'>('mixGrid')
@@ -651,6 +673,11 @@ async function handleDeleteSlot(slotId: number) {
 }
 
 async function handleSeedDemo() {
+  if (!canManageTimetable.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to reset demo routines.')
+    return
+  }
+
   if (
     !confirm(
       'Re-seed standard demo dataset? This will generate 70+ master routine slots across all grades, including active schedules, conflict validation cases, and marked teacher leave records.'
@@ -684,6 +711,11 @@ async function fetchVersions() {
 }
 
 async function handleCreateVersion() {
+  if (!canManageTimetable.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to create routine versions.')
+    return
+  }
+
   if (!versionForm.value.name || !versionForm.value.effective_from) {
     notifyWarn('Validation', 'Please provide version name and effective date.')
     return
@@ -739,6 +771,7 @@ onMounted(async () => {
     >
       <template #actions>
         <Button
+          v-if="canManageTimetable"
           label="Reset Demo Routine"
           icon="pi pi-bolt"
           severity="help"
@@ -748,6 +781,7 @@ onMounted(async () => {
           title="Seed realistic cross-grade routine with on-leave teachers and collision tests"
         />
         <Button
+          v-if="canManageTimetable"
           label="New Version"
           icon="pi pi-plus"
           severity="secondary"
@@ -1750,7 +1784,14 @@ onMounted(async () => {
           <h3 class="text-base font-bold text-slate-900">Routine Versions & Audit Trail</h3>
           <p class="text-xs text-slate-500">Manage drafts, revision histories, conflict audits, and routine publications</p>
         </div>
-        <Button label="New Version Draft" icon="pi pi-plus" class="brand-gradient-bg border-none" size="small" @click="versionModalVisible = true" />
+        <Button
+          v-if="canManageTimetable"
+          label="New Version Draft"
+          icon="pi pi-plus"
+          class="brand-gradient-bg border-none"
+          size="small"
+          @click="versionModalVisible = true"
+        />
       </div>
 
       <div class="border border-slate-200 rounded-xl overflow-hidden">

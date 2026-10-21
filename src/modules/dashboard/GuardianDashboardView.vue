@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
+import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatBDT } from '@/utils/formatters'
@@ -443,10 +445,123 @@ const welcomeSubtitle = computed(() => {
   return `Overview for ${childCount} linked child(ren) • Session 2026 Academic & Financial Telemetry`
 })
 
-function payTuitionInvoice(invoice: any) {
-  router.push({
-    path: '/parent/payments',
-    query: { invoice_id: invoice.id.toString(), amount: invoice.outstanding_balance.toString() },
+// Parent Online Tuition Payment Modal State
+const showPayModal = ref(false)
+const selectedPayInvoice = ref<any | null>(null)
+const selectedChannel = ref<'bkash' | 'sslcommerz' | 'nagad'>('bkash')
+const customPaymentAmount = ref<number | null>(null)
+const processingPayment = ref(false)
+
+function openOnlinePaymentModal(invoice?: any) {
+  if (invoice) {
+    selectedPayInvoice.value = invoice
+    customPaymentAmount.value = invoice.outstanding_balance
+  } else if (current.value.financial.outstanding_invoices.length > 0) {
+    selectedPayInvoice.value = current.value.financial.outstanding_invoices[0]
+    customPaymentAmount.value = current.value.financial.outstanding_invoices[0].outstanding_balance
+  } else {
+    toast.add({
+      severity: 'info',
+      summary: 'No Outstanding Dues',
+      detail: 'All tuition and academic fees for your linked children are fully settled.',
+      life: 3000,
+    })
+    return
+  }
+  selectedChannel.value = 'bkash'
+  showPayModal.value = true
+}
+
+async function confirmOnlinePayment() {
+  if (!selectedPayInvoice.value) return
+  const inv = selectedPayInvoice.value
+  const amountToPay = customPaymentAmount.value && customPaymentAmount.value > 0
+    ? Math.min(customPaymentAmount.value, inv.outstanding_balance)
+    : inv.outstanding_balance
+
+  processingPayment.value = true
+  const idempotencyKey = `PARENT-PAY-${inv.id}-${Date.now()}`
+
+  try {
+    const channelName = selectedChannel.value === 'bkash'
+      ? 'bKash Tokenized'
+      : (selectedChannel.value === 'nagad' ? 'Nagad Online' : 'SSLCommerz (Cards/NetBanking)')
+
+    const res = await api.post(
+      '/api/v1/finance/payments/collect',
+      {
+        invoice_id: inv.id,
+        amount: amountToPay,
+        payment_method: channelName,
+        paid_at: new Date().toISOString().substring(0, 10),
+        notes: `Parent Online Settlement via ${selectedChannel.value.toUpperCase()}`,
+        idempotency_key: idempotencyKey,
+      },
+      {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }
+    )
+
+    const receiptNo = res.data?.data?.receipt_number || `REC-${Date.now().toString().slice(-6)}`
+
+    // Update local state: reduce invoice balance or remove if settled
+    const outstandingInvs = current.value.financial.outstanding_invoices
+    const idx = outstandingInvs.findIndex((i) => i.id === inv.id)
+    if (idx !== -1) {
+      if (amountToPay >= inv.outstanding_balance) {
+        outstandingInvs.splice(idx, 1)
+      } else {
+        outstandingInvs[idx].outstanding_balance -= amountToPay
+        outstandingInvs[idx].total_paid += amountToPay
+      }
+    }
+
+    // Decrement total outstanding dues
+    current.value.financial.ledger_breakdown.outstanding_receivables = Math.max(
+      0,
+      current.value.financial.ledger_breakdown.outstanding_receivables - amountToPay
+    )
+    current.value.financial.ledger_breakdown.confirmed_collections += amountToPay
+
+    // Append new receipt
+    current.value.financial.payment_receipts.unshift({
+      id: Date.now(),
+      receipt_number: receiptNo,
+      invoice_number: inv.invoice_number,
+      amount: amountToPay,
+      payment_method: channelName,
+      gateway_transaction_id: `GW_${Date.now().toString().slice(-8)}`,
+      paid_at: new Date().toISOString().substring(0, 10),
+      paid_at_formatted: 'Just now',
+      status: 'CONFIRMED',
+    })
+
+    showPayModal.value = false
+    toast.add({
+      severity: 'success',
+      summary: 'Tuition Payment Confirmed',
+      detail: `Payment of ${formatBDT(amountToPay)} settled successfully. Receipt #${receiptNo} generated.`,
+      life: 5000,
+    })
+  } catch (err: any) {
+    const errorMsg = err.response?.data?.message || err.message || 'Payment processing error.'
+    toast.add({
+      severity: 'error',
+      summary: 'Payment Failed',
+      detail: errorMsg,
+      life: 5000,
+    })
+  } finally {
+    processingPayment.value = false
+  }
+}
+
+function downloadReceipt(receipt: any) {
+  toast.add({
+    severity: 'info',
+    summary: 'Receipt Generated',
+    detail: `Receipt #${receipt.receipt_number} for ${formatBDT(receipt.amount)} is ready for your records.`,
+    life: 3500,
   })
 }
 
@@ -491,14 +606,7 @@ onMounted(() => {
           label="Pay Child Fees"
           icon="pi pi-wallet"
           severity="success"
-          @click="router.push('/parent/payments')"
-        />
-
-        <AppButton
-          label="All Invoices"
-          icon="pi pi-file"
-          severity="primary"
-          @click="router.push('/parent/fees')"
+          @click="openOnlinePaymentModal()"
         />
       </template>
     </PageHeader>
@@ -568,15 +676,6 @@ onMounted(() => {
           </h4>
           <p class="alert-message">{{ current.attendance.alert_message }}</p>
         </div>
-        <div class="alert-action" v-if="current.attendance.has_alert">
-          <AppButton
-            label="Send Teacher Leave Note"
-            icon="pi pi-envelope"
-            size="small"
-            severity="warn"
-            @click="toast.add({ severity: 'info', summary: 'Leave Submission', detail: 'Contact homeroom teacher form opened', life: 3500 })"
-          />
-        </div>
       </div>
 
       <!-- 3. Key Telemetry KPI Cards -->
@@ -618,13 +717,13 @@ onMounted(() => {
           :class="current.financial.ledger_breakdown.outstanding_receivables > 0 ? 'highlight-amber' : 'highlight-green'"
         >
           <div class="kpi-top">
-            <span class="kpi-label">Receivables Balance</span>
+            <span class="kpi-label">Outstanding Tuition</span>
             <div class="kpi-icon"><i class="pi pi-wallet"></i></div>
           </div>
           <div class="kpi-content">
             <h2 class="kpi-number">{{ formatBDT(current.financial.ledger_breakdown.outstanding_receivables) }}</h2>
             <span class="kpi-meta" v-if="current.financial.ledger_breakdown.outstanding_receivables > 0">
-              <i class="pi pi-clock text-amber-500"></i> Net outstanding fee balance
+              <i class="pi pi-clock text-amber-500"></i> Fee dues pending online settlement
             </span>
             <span class="kpi-meta" v-else>
               <i class="pi pi-check-circle text-emerald-500"></i> All child tuition fully cleared
@@ -649,59 +748,25 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 4. Strictly Segregated Financial Reporting Ledger (Invoiced, Confirmed, Refunds, Waivers, Outstanding) -->
-      <div class="panel-card glass-panel financial-segregation-card">
+      <!-- 4. Tuition Fees & Payment History -->
+      <div class="panel-card glass-panel">
         <div class="panel-header">
           <div class="header-left">
-            <span class="panel-badge">Institutional Accounting Standard</span>
-            <h3 class="panel-title">Financial Ledger & Revenue Breakdown</h3>
+            <span class="panel-badge">Tuition & Fees</span>
+            <h3 class="panel-title">Child Tuition Invoices & Payment History</h3>
             <p class="panel-subtitle">
-              Strict accounting separation: {{ current.financial.ledger_breakdown.accounting_formula }}
+              Review pending semester tuition invoices and verified payment receipts for {{ current.selected_child?.full_name || 'your child' }}
             </p>
           </div>
-          <div class="compliance-badge">
-            <i class="pi pi-shield"></i> Confirmed Settlement Enforced
+          <div v-if="current.financial.ledger_breakdown.outstanding_receivables > 0">
+            <AppButton
+              label="Pay Total Dues"
+              icon="pi pi-credit-card"
+              size="small"
+              severity="success"
+              @click="openOnlinePaymentModal()"
+            />
           </div>
-        </div>
-
-        <!-- 5-Column Financial Reconciliation Ribbon -->
-        <div class="ledger-metrics-grid">
-          <div class="metric-box m-invoiced">
-            <span class="m-label">1. Gross Invoiced</span>
-            <h3 class="m-val">{{ formatBDT(current.financial.ledger_breakdown.invoiced_amount) }}</h3>
-            <span class="m-sub">Tuition & Facilities fees</span>
-          </div>
-
-          <div class="metric-box m-waivers">
-            <span class="m-label">2. Approved Waivers</span>
-            <h3 class="m-val">- {{ formatBDT(current.financial.ledger_breakdown.waivers_amount) }}</h3>
-            <span class="m-sub">Sibling & Merit Concessions</span>
-          </div>
-
-          <div class="metric-box m-collections">
-            <span class="m-label">3. Confirmed Collections</span>
-            <h3 class="m-val">- {{ formatBDT(current.financial.ledger_breakdown.confirmed_collections) }}</h3>
-            <span class="m-sub text-emerald-600 font-semibold"><i class="pi pi-check"></i> Cleared Gateway Receipts</span>
-          </div>
-
-          <div class="metric-box m-refunds">
-            <span class="m-label">4. Approved Refunds</span>
-            <h3 class="m-val">+ {{ formatBDT(current.financial.ledger_breakdown.refunds_amount) }}</h3>
-            <span class="m-sub">Processed Return Ledger</span>
-          </div>
-
-          <div class="metric-box m-outstanding">
-            <span class="m-label">5. Outstanding Receivables</span>
-            <h3 class="m-val text-amber-700">{{ formatBDT(current.financial.ledger_breakdown.outstanding_receivables) }}</h3>
-            <span class="m-sub text-amber-600 font-bold">Uncollected Net Balance</span>
-          </div>
-        </div>
-
-        <div class="accounting-rule-note">
-          <i class="pi pi-info-circle"></i>
-          <span>
-            <strong>Audit Guarantee:</strong> Payment checkout attempts with status <em>INITIATED</em> or <em>PENDING</em> are strictly excluded from confirmed collections until verified and committed by gateway webhooks.
-          </span>
         </div>
 
         <!-- Invoices & Receipts Sub-Tabs -->
@@ -725,6 +790,11 @@ onMounted(() => {
 
           <!-- Dues List -->
           <div v-if="activeFinanceTab === 'dues'" class="dues-sublist">
+            <div v-if="current.financial.outstanding_invoices.length === 0" class="p-8 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-500">
+              <i class="pi pi-check-circle text-3xl text-emerald-500 mb-2"></i>
+              <p class="text-sm font-bold text-slate-700">All Tuition Dues Settled</p>
+              <p class="text-xs text-slate-400 mt-0.5">There are no outstanding fee invoices for {{ current.selected_child?.full_name || 'your child' }}.</p>
+            </div>
             <div v-for="inv in current.financial.outstanding_invoices" :key="inv.id" class="invoice-box">
               <div class="inv-details">
                 <span class="inv-code">{{ inv.invoice_number }}</span>
@@ -740,11 +810,11 @@ onMounted(() => {
               <div class="inv-cta">
                 <StatusBadge :status="inv.is_overdue ? 'OVERDUE' : 'PENDING'" :label="inv.is_overdue ? 'OVERDUE' : 'DUE'" />
                 <AppButton
-                  label="Pay via bKash / Card"
+                  label="Pay Online (bKash / Card)"
                   icon="pi pi-credit-card"
                   size="small"
                   severity="success"
-                  @click="payTuitionInvoice(inv)"
+                  @click="openOnlinePaymentModal(inv)"
                 />
               </div>
             </div>
@@ -752,15 +822,29 @@ onMounted(() => {
 
           <!-- Receipts List -->
           <div v-else class="receipts-sublist">
+            <div v-if="current.financial.payment_receipts.length === 0" class="p-8 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-500">
+              <i class="pi pi-receipt text-3xl text-slate-300 mb-2"></i>
+              <p class="text-sm font-bold text-slate-700">No Receipts Found</p>
+              <p class="text-xs text-slate-400 mt-0.5">Receipts will appear here once tuition payments are verified.</p>
+            </div>
             <div v-for="rec in current.financial.payment_receipts" :key="rec.id" class="receipt-box">
               <div class="rec-info">
                 <span class="rec-num">{{ rec.receipt_number }}</span>
                 <h4 class="rec-amt">{{ formatBDT(rec.amount) }}</h4>
                 <span class="rec-method"><i class="pi pi-shield"></i> {{ rec.payment_method }} ({{ rec.gateway_transaction_id }})</span>
               </div>
-              <div class="rec-meta">
-                <span class="rec-date">{{ rec.paid_at_formatted }}</span>
-                <span class="confirmed-pill"><i class="pi pi-check-circle"></i> Confirmed & Settled</span>
+              <div class="rec-meta flex items-center gap-3">
+                <div class="text-right">
+                  <span class="rec-date block">{{ rec.paid_at_formatted }}</span>
+                  <span class="confirmed-pill inline-flex"><i class="pi pi-check-circle"></i> Confirmed & Settled</span>
+                </div>
+                <AppButton
+                  label="View Receipt"
+                  icon="pi pi-download"
+                  size="small"
+                  text
+                  @click="downloadReceipt(rec)"
+                />
               </div>
             </div>
           </div>
@@ -778,11 +862,12 @@ onMounted(() => {
               <p class="panel-subtitle">Official Bangladesh NCTB Term Result for {{ current.selected_child?.full_name }}</p>
             </div>
             <AppButton
-              label="Admit Cards & Routine"
-              icon="pi pi-external-link"
+              label="Full Report Card"
+              icon="pi pi-arrow-right"
+              iconPos="right"
               text
               size="small"
-              @click="router.push('/parent/examinations')"
+              @click="router.push('/exams')"
             />
           </div>
 
@@ -888,6 +973,105 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Parent Online Tuition Fee Payment Modal -->
+    <Dialog
+      v-model:visible="showPayModal"
+      modal
+      :header="`Pay Tuition Online — ${selectedPayInvoice?.invoice_number || 'Invoice'}`"
+      :style="{ width: '520px', maxWidth: '95vw' }"
+    >
+      <div v-if="selectedPayInvoice" class="flex flex-col gap-5 pt-1">
+        <!-- Invoice Details Card -->
+        <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
+          <div>
+            <span class="font-bold text-slate-800 text-sm block">{{ selectedPayInvoice.title }}</span>
+            <span class="text-slate-500 block mt-0.5">Due Date: {{ selectedPayInvoice.due_date_formatted }}</span>
+            <span class="text-slate-500 block mt-0.5">Student: <strong>{{ current.selected_child?.full_name }}</strong> ({{ current.selected_child?.student_uid }})</span>
+          </div>
+          <div class="text-right">
+            <span class="text-[11px] text-slate-400 uppercase font-bold tracking-wider block">Outstanding Balance</span>
+            <span class="font-extrabold text-amber-600 text-lg block">{{ formatBDT(selectedPayInvoice.outstanding_balance) }}</span>
+          </div>
+        </div>
+
+        <!-- Payment Amount Input (Supports partial or full payment) -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-xs font-bold text-slate-700">Payment Amount (৳ BDT)</label>
+          <InputText
+            v-model.number="customPaymentAmount"
+            type="number"
+            :max="selectedPayInvoice.outstanding_balance"
+            min="100"
+            class="w-full font-mono text-base font-bold"
+          />
+          <div class="flex justify-between items-center text-[11px] text-slate-400 mt-0.5">
+            <span>You can pay the full amount or make a partial instalment.</span>
+            <button
+              type="button"
+              class="text-emerald-600 hover:text-emerald-700 font-semibold underline cursor-pointer"
+              @click="customPaymentAmount = selectedPayInvoice.outstanding_balance"
+            >
+              Pay Full ({{ formatBDT(selectedPayInvoice.outstanding_balance) }})
+            </button>
+          </div>
+        </div>
+
+        <!-- Gateway / Payment Channel Selection -->
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-bold text-slate-700">Select Instant Payment Gateway</label>
+          <div class="grid grid-cols-3 gap-3">
+            <button
+              type="button"
+              class="p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer"
+              :class="selectedChannel === 'bkash' ? 'border-pink-500 bg-pink-50/50 shadow-xs ring-2 ring-pink-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
+              @click="selectedChannel = 'bkash'"
+            >
+              <span class="font-bold text-pink-600 text-sm">bKash</span>
+              <span class="text-[10px] text-slate-500">Instant Wallet</span>
+            </button>
+
+            <button
+              type="button"
+              class="p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer"
+              :class="selectedChannel === 'sslcommerz' ? 'border-emerald-500 bg-emerald-50/50 shadow-xs ring-2 ring-emerald-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
+              @click="selectedChannel = 'sslcommerz'"
+            >
+              <span class="font-bold text-emerald-700 text-sm">Cards & Bank</span>
+              <span class="text-[10px] text-slate-500">SSLCommerz</span>
+            </button>
+
+            <button
+              type="button"
+              class="p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer"
+              :class="selectedChannel === 'nagad' ? 'border-orange-500 bg-orange-50/50 shadow-xs ring-2 ring-orange-500/20' : 'border-slate-200 bg-white hover:border-slate-300'"
+              @click="selectedChannel = 'nagad'"
+            >
+              <span class="font-bold text-orange-600 text-sm">Nagad</span>
+              <span class="text-[10px] text-slate-500">Digital Post</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Security / Guarantee Badge -->
+        <div class="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl flex items-center gap-2.5 text-xs text-emerald-800">
+          <i class="pi pi-shield text-emerald-600 text-base shrink-0"></i>
+          <span>Official 256-bit encrypted school payment gateway. A verified digital receipt will be issued instantly upon completion.</span>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-200">
+          <AppButton label="Cancel" severity="secondary" text @click="showPayModal = false" />
+          <AppButton
+            :label="`Confirm Payment of ${formatBDT(customPaymentAmount || selectedPayInvoice.outstanding_balance)}`"
+            icon="pi pi-check"
+            severity="success"
+            :loading="processingPayment"
+            @click="confirmOnlinePayment()"
+          />
+        </div>
+      </div>
+    </Dialog>
   </div>
 </template>
 

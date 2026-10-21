@@ -32,9 +32,18 @@ const loading = ref(false)
 // Role detection
 const isSuperOrAdmin = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin'))
 const isPrincipal = computed(() => authStore.hasRole('principal'))
-const isTeacher = computed(() => authStore.hasRole('teacher'))
-const canManageNotices = computed(() => isSuperOrAdmin.value || isPrincipal.value || authStore.hasPermission('notices.manage'))
-const canApprove = computed(() => isSuperOrAdmin.value || isPrincipal.value)
+const isTeacher = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher'
+})
+const canManageNotices = computed(() => !isTeacher.value && (isSuperOrAdmin.value || isPrincipal.value || authStore.hasPermission('notices.manage')))
+const canTargetAnnounce = computed(() => !isTeacher.value && canManageNotices.value)
+const canApprove = computed(() => !isTeacher.value && (isSuperOrAdmin.value || isPrincipal.value))
 
 // Metadata for target pickers
 const classesList = ref<ClassLevel[]>([])
@@ -186,6 +195,11 @@ async function fetchAnnouncements(): Promise<void> {
 }
 
 async function handleCreateAnnouncement(): Promise<void> {
+  if (!canTargetAnnounce.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to create targeted announcements.')
+    return
+  }
+
   if (!newAnnouncement.value.title.trim() || !newAnnouncement.value.content.trim()) {
     notifyWarn('Validation', 'Title and content are required.')
     return
@@ -589,7 +603,7 @@ onMounted(async () => {
           @click="postNoticeDialog = true"
         />
         <Button
-          v-if="canManageNotices || isTeacher"
+          v-if="canTargetAnnounce"
           icon="pi pi-send"
           label="Target Announcement"
           severity="success"
@@ -870,6 +884,7 @@ onMounted(async () => {
         <h3>No Targeted Announcements Found</h3>
         <p>Broadcast targeted updates to classes, sections, or user roles.</p>
         <Button
+          v-if="canTargetAnnounce"
           icon="pi pi-send"
           label="Create Targeted Announcement"
           severity="success"

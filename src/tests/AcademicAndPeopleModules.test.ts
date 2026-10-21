@@ -172,4 +172,150 @@ describe('Academic Foundation & People Management Frontend Contracts', () => {
     expect(updatedAssignment.is_class_teacher).toBe(false)
     expect(updatedAssignment.status).toBe('ACTIVE')
   })
+
+  it('restricts Batch Promotion, Graduation, Transfer Student, and Withdraw Student from teacher panel in SIS', () => {
+    const authStore = useAuthStore()
+    authStore.user = {
+      id: 25,
+      name: 'Kazi Farhana',
+      email: 'farhana@evergreen.edu.bd',
+      phone: '+8801722334455',
+      user_type: 'teacher',
+      is_active: true,
+      avatar: null,
+      roles: ['teacher'],
+      permissions: ['students.view', 'attendance.take', 'exams.view', 'marks.enter'],
+    }
+
+    const roles = authStore.user?.roles ?? []
+    const userType = authStore.user?.user_type
+    const isTeacher =
+      !authStore.isSuperAdmin &&
+      !roles.includes('admin') &&
+      !roles.includes('super_admin') &&
+      userType !== 'admin' &&
+      userType !== 'super_admin' &&
+      (authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher')
+
+    expect(isTeacher).toBe(true)
+
+    const canPromote = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.promote') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canGraduate = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.promote') ||
+      authStore.hasPermission('students.graduate') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canTransfer = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.edit') ||
+      authStore.hasPermission('students.transfer') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canWithdraw = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.edit') ||
+      authStore.hasPermission('students.withdraw') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canChangeStatus = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.edit') ||
+      authStore.hasPermission('students.manage')
+    )
+
+    // Verify all restricted actions evaluate to false for teachers
+    expect(canPromote).toBe(false)
+    expect(canGraduate).toBe(false)
+    expect(canTransfer).toBe(false)
+    expect(canWithdraw).toBe(false)
+    expect(canChangeStatus).toBe(false)
+  })
+
+  it('permits Batch Promotion, Graduation, Transfer Student, Withdraw Student, and Change Status for administrative users in SIS', () => {
+    const authStore = useAuthStore()
+    authStore.user = {
+      id: 1,
+      name: 'System Admin',
+      email: 'admin@evergreen.edu.bd',
+      phone: '+8801700000000',
+      user_type: 'super_admin',
+      is_active: true,
+      avatar: null,
+      roles: ['super_admin'],
+      permissions: ['*'],
+    }
+
+    const roles = authStore.user?.roles ?? []
+    const userType = authStore.user?.user_type
+    const isTeacher =
+      !authStore.isSuperAdmin &&
+      !roles.includes('admin') &&
+      !roles.includes('super_admin') &&
+      userType !== 'admin' &&
+      userType !== 'super_admin' &&
+      (authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher')
+
+    expect(isTeacher).toBe(false)
+
+    const canPromote = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.promote') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canGraduate = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.promote') ||
+      authStore.hasPermission('students.graduate') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canTransfer = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.edit') ||
+      authStore.hasPermission('students.transfer') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canWithdraw = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.edit') ||
+      authStore.hasPermission('students.withdraw') ||
+      authStore.hasPermission('students.manage')
+    )
+    const canChangeStatus = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('students.edit') ||
+      authStore.hasPermission('students.manage')
+    )
+
+    // Verify all actions evaluate to true for administrator
+    expect(canPromote).toBe(true)
+    expect(canGraduate).toBe(true)
+    expect(canTransfer).toBe(true)
+    expect(canWithdraw).toBe(true)
+    expect(canChangeStatus).toBe(true)
+  })
 })

@@ -34,14 +34,12 @@ export const parentRoutes: RouteRecordRaw[] = [
       {
         path: 'fees',
         name: 'parent-fees',
-        component: () => import('@/modules/fees/FeesView.vue'),
-        meta: { title: 'Fee Invoices & Dues — Evergreen Academy' },
+        redirect: { name: 'parent-dashboard' },
       },
       {
         path: 'payments',
         name: 'parent-payments',
-        component: () => import('@/modules/payments/PaymentsView.vue'),
-        meta: { title: 'Pay Tuition (bKash / SSLCommerz) — Evergreen Academy' },
+        redirect: { name: 'parent-dashboard' },
       },
       {
         path: 'notices',

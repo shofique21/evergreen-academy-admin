@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
+import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
@@ -74,6 +75,28 @@ interface MediumItem {
 }
 
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
+const authStore = useAuthStore()
+
+const isTeacher = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher'
+})
+
+const canManageAcademics = computed(() => {
+  if (isTeacher.value) return false
+  return (
+    authStore.isSuperAdmin ||
+    authStore.hasRole('admin') ||
+    authStore.persona === 'admin' ||
+    authStore.hasPermission('academic-years.manage') ||
+    authStore.hasPermission('classes.manage')
+  )
+})
 
 const activeTab = ref<'sessions' | 'class-levels' | 'classes' | 'subjects' | 'rooms'>('class-levels')
 const loading = ref(false)
@@ -194,6 +217,10 @@ function applyEditClassPreset(name: string, level: number) {
 }
 
 function openAddClassModal(presetName?: string, presetLevel?: number) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to add class levels.')
+    return
+  }
   const nextLevel = classStructures.value.length > 0
     ? Math.max(...classStructures.value.map(c => c.numeric_level)) + 1
     : 1
@@ -227,6 +254,10 @@ async function handleCreateClass() {
 }
 
 function openEditClassModal(classItem: any) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to edit class levels.')
+    return
+  }
   editingClass.value = classItem
   editClassForm.value = {
     name: classItem.grade || classItem.name,
@@ -291,6 +322,10 @@ async function handleDeleteClass(classItem?: any) {
 }
 
 async function handleBatchGenerateNctb(group: 'PRIMARY' | 'SECONDARY' | 'ALL') {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to generate class structures.')
+    return
+  }
   let classesToCreate = []
   if (group === 'PRIMARY') {
     classesToCreate = [
@@ -349,6 +384,21 @@ const sectionForm = ref({
   name: '',
   capacity: 45,
   room_number: '',
+})
+
+// Edit Section Modal
+const editSectionDialogVisible = ref(false)
+const editSectionSubmitting = ref(false)
+const editingSection = ref<any | null>(null)
+const editingSectionParentClass = ref<any | null>(null)
+const editSectionForm = ref({
+  class_id: '' as any,
+  shift_id: '' as any,
+  medium_id: '' as any,
+  name: '',
+  capacity: 45,
+  room_number: '',
+  is_active: true,
 })
 
 // Subject Modal
@@ -474,6 +524,10 @@ function formatDateForInput(dateVal?: string | Date | null): string {
 }
 
 function openAddTermModal(session: AcademicSessionRow) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to add examination terms.')
+    return
+  }
   selectedSessionForTerm.value = session
   termForm.value = {
     name: '',
@@ -506,6 +560,10 @@ async function handleCreateTerm() {
 }
 
 function openEditSessionModal(session: AcademicSessionRow) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to edit academic sessions.')
+    return
+  }
   editingSession.value = session
   editSessionForm.value = {
     name: session.name,
@@ -539,6 +597,10 @@ async function handleUpdateSession() {
 }
 
 function openEditTermModal(term: AcademicTerm, parentSession?: AcademicSessionRow) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to edit academic terms.')
+    return
+  }
   if (parentSession) {
     selectedSessionForTerm.value = parentSession
   } else {
@@ -622,6 +684,10 @@ function applyCapacityPreset(cap: number) {
 }
 
 function openAddSectionModal(classId?: number) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to add sections.')
+    return
+  }
   sectionForm.value = {
     class_id: classId || classStructures.value[0]?.id || '',
     shift_id: shiftsList.value[0]?.id || '',
@@ -653,6 +719,73 @@ async function handleCreateSection() {
   }
 }
 
+function applyEditSectionNamePreset(name: string) {
+  editSectionForm.value.name = name
+}
+
+function applyEditCapacityPreset(cap: number) {
+  editSectionForm.value.capacity = cap
+}
+
+function openEditSectionModal(section: any, parentClass?: any) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to edit sections.')
+    return
+  }
+  editingSection.value = section
+  editingSectionParentClass.value = parentClass || null
+  editSectionForm.value = {
+    class_id: section.class_id || parentClass?.id || (classStructures.value[0]?.id || ''),
+    shift_id: section.shift_id ?? section.shift?.id ?? (shiftsList.value[0]?.id || ''),
+    medium_id: section.medium_id ?? section.medium?.id ?? (mediumsList.value[0]?.id || ''),
+    name: section.name,
+    capacity: section.capacity ?? 45,
+    room_number: section.room_number || '',
+    is_active: section.is_active !== undefined ? Boolean(section.is_active) : true,
+  }
+  editSectionDialogVisible.value = true
+}
+
+async function handleUpdateSection() {
+  if (!editingSection.value) return
+  if (!editSectionForm.value.name?.trim() || !editSectionForm.value.shift_id || !editSectionForm.value.medium_id) {
+    notifyWarn('Validation Required', 'Please provide section title, shift, and medium.')
+    return
+  }
+
+  try {
+    editSectionSubmitting.value = true
+    await api.put(`/api/v1/academics/sections/${editingSection.value.id}`, editSectionForm.value)
+    notifySuccess('Section Updated', `Section "${editSectionForm.value.name}" updated successfully.`)
+    editSectionDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Section Error', errorObj.response?.data?.message || errorObj.message || 'Could not update section.')
+  } finally {
+    editSectionSubmitting.value = false
+  }
+}
+
+async function handleDeleteSection() {
+  if (!editingSection.value) return
+  const confirmed = window.confirm(`Are you sure you want to delete section "${editSectionForm.value.name}"? This action cannot be reversed.`)
+  if (!confirmed) return
+
+  try {
+    editSectionSubmitting.value = true
+    await api.delete(`/api/v1/academics/sections/${editingSection.value.id}`)
+    notifySuccess('Section Deleted', `Section "${editSectionForm.value.name}" removed successfully.`)
+    editSectionDialogVisible.value = false
+    await fetchAcademicData()
+  } catch (err: unknown) {
+    const errorObj = err as { response?: { data?: { message?: string } }; message?: string }
+    notifyError('Delete Error', errorObj.response?.data?.message || errorObj.message || 'Could not delete section.')
+  } finally {
+    editSectionSubmitting.value = false
+  }
+}
+
 function applySubjectPreset(name: string, code: string, hasPractical = false, type = 'COMPULSORY') {
   subjectForm.value.name = name
   subjectForm.value.code = code
@@ -666,6 +799,10 @@ function applyMarksPreset(fullMarks: number, passMarks: number) {
 }
 
 function openAddSubjectModal(classId?: number) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to add subjects.')
+    return
+  }
   subjectForm.value = {
     class_id: classId || classStructures.value[0]?.id || '',
     name: '',
@@ -699,6 +836,10 @@ async function handleCreateSubject() {
 }
 
 function openEditSubjectModal(subject: any) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to edit subjects.')
+    return
+  }
   editingSubject.value = subject
   editSubjectForm.value = {
     class_id: subject.class_id,
@@ -775,6 +916,10 @@ function applyRoomPreset(roomNumber: string, roomType: 'CLASSROOM' | 'LAB_PHYSIC
 }
 
 function openAddRoomModal() {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to register facility rooms.')
+    return
+  }
   roomForm.value = {
     campus_id: 1,
     room_number: '',
@@ -806,6 +951,10 @@ async function handleCreateRoom() {
 }
 
 function openEditRoomModal(room: any) {
+  if (!canManageAcademics.value) {
+    notifyWarn('Access Restricted', 'You do not have permission to edit facility rooms.')
+    return
+  }
   editingRoom.value = room
   editRoomForm.value = {
     room_number: room.room_number,
@@ -874,46 +1023,48 @@ onMounted(() => {
 <template>
   <div class="academics-page">
     <PageHeader
-      title="Academic Foundation & Institutional Framework"
-      subtitle="Institutional calendar boundaries, Bangladesh NCTB class levels, sections, subjects, shifts, and facility rooms"
+      :title="isTeacher ? 'Academic Curriculum & Syllabus' : 'Academic Foundation & Institutional Framework'"
+      :subtitle="isTeacher ? 'Explore Bangladesh NCTB grade levels, sections, curricular subjects, credit hours, and pass marks' : 'Institutional calendar boundaries, Bangladesh NCTB class levels, sections, subjects, shifts, and facility rooms'"
       showBreadcrumbs
     >
       <template #actions>
-        <Button
-          v-if="activeTab === 'class-levels'"
-          label="Add Class Level"
-          icon="pi pi-plus-circle"
-          class="brand-gradient-bg border-none"
-          @click="openAddClassModal()"
-        />
-        <Button
-          v-else-if="activeTab === 'classes'"
-          label="Add Section"
-          icon="pi pi-plus"
-          class="brand-gradient-bg border-none"
-          @click="openAddSectionModal()"
-        />
-        <Button
-          v-else-if="activeTab === 'subjects'"
-          label="New Subject"
-          icon="pi pi-book"
-          class="brand-gradient-bg border-none"
-          @click="subjectDialogVisible = true"
-        />
-        <Button
-          v-else-if="activeTab === 'rooms'"
-          label="New Room"
-          icon="pi pi-building"
-          class="brand-gradient-bg border-none"
-          @click="openAddRoomModal()"
-        />
-        <Button
-          v-else
-          label="New Academic Session"
-          icon="pi pi-calendar-plus"
-          class="brand-gradient-bg border-none"
-          @click="sessionDialogVisible = true"
-        />
+        <template v-if="canManageAcademics">
+          <Button
+            v-if="activeTab === 'class-levels'"
+            label="Add Class Level"
+            icon="pi pi-plus-circle"
+            class="brand-gradient-bg border-none"
+            @click="openAddClassModal()"
+          />
+          <Button
+            v-else-if="activeTab === 'classes'"
+            label="Add Section"
+            icon="pi pi-plus"
+            class="brand-gradient-bg border-none"
+            @click="openAddSectionModal()"
+          />
+          <Button
+            v-else-if="activeTab === 'subjects'"
+            label="New Subject"
+            icon="pi pi-book"
+            class="brand-gradient-bg border-none"
+            @click="subjectDialogVisible = true"
+          />
+          <Button
+            v-else-if="activeTab === 'rooms'"
+            label="New Room"
+            icon="pi pi-building"
+            class="brand-gradient-bg border-none"
+            @click="openAddRoomModal()"
+          />
+          <Button
+            v-else
+            label="New Academic Session"
+            icon="pi pi-calendar-plus"
+            class="brand-gradient-bg border-none"
+            @click="sessionDialogVisible = true"
+          />
+        </template>
         <Button
           icon="pi pi-refresh"
           label="Refresh"
@@ -1039,7 +1190,7 @@ onMounted(() => {
             <StatusBadge :status="data.status" showDot />
           </template>
         </Column>
-        <Column header="Actions" style="width: 180px">
+        <Column v-if="canManageAcademics" header="Actions" style="width: 180px">
           <template #body="{ data }">
             <div class="flex items-center gap-2">
               <button
@@ -1076,7 +1227,7 @@ onMounted(() => {
           </div>
           <p class="card-subtitle">Manage progressive educational grade levels (Pre-Primary, Primary, Secondary, Higher Secondary)</p>
         </div>
-        <div class="flex items-center gap-2 flex-wrap">
+        <div v-if="canManageAcademics" class="flex items-center gap-2 flex-wrap">
           <Button
             label="Generate NCTB Classes (1–10)"
             icon="pi pi-bolt"
@@ -1199,13 +1350,18 @@ onMounted(() => {
         <Column header="Allocated Sections">
           <template #body="{ data }">
             <div v-if="data.sections && data.sections.length > 0" class="flex flex-wrap gap-1.5">
-              <span
+              <button
                 v-for="s in data.sections"
                 :key="s.id"
-                class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200"
+                type="button"
+                class="section-pill-btn group"
+                @click="openEditSectionModal(s, data)"
+                title="Click to edit section arm"
               >
-                {{ s.name }} (Cap: {{ s.capacity }})
-              </span>
+                <span class="font-semibold">{{ s.name }}</span>
+                <span class="text-[11px] text-emerald-800/80 font-normal">({{ s.capacity }} seats)</span>
+                <i class="pi pi-pencil text-[10px] text-emerald-700 opacity-60 group-hover:opacity-100 transition-opacity ml-1"></i>
+              </button>
             </div>
             <span v-else class="text-xs text-slate-400 italic">No sections configured yet</span>
           </template>
@@ -1217,7 +1373,7 @@ onMounted(() => {
           </template>
         </Column>
 
-        <Column header="Actions" style="width: 220px">
+        <Column v-if="canManageAcademics" header="Actions" style="width: 220px">
           <template #body="{ data }">
             <div class="flex items-center gap-1.5">
               <button
@@ -1256,16 +1412,31 @@ onMounted(() => {
     <div v-if="activeTab === 'classes'" class="table-card glass-panel">
       <div class="card-header flex justify-between items-center flex-wrap gap-2">
         <div>
-          <h3 class="card-title">NCTB Grade Levels & Section Distribution</h3>
-          <p class="card-subtitle">Curriculum mediums, shifts (Morning / Day), and section capacities</p>
+          <div class="flex items-center gap-2">
+            <h3 class="card-title">NCTB Grade Levels & Section Distribution</h3>
+            <span class="badge-institutional">Class & Section Management</span>
+          </div>
+          <p class="card-subtitle">Curriculum mediums, shifts (Morning / Day), section capacities, and grade parameters</p>
         </div>
-        <Button
-          label="Add Section"
-          icon="pi pi-plus"
-          size="small"
-          class="brand-gradient-bg border-none"
-          @click="openAddSectionModal()"
-        />
+        <div class="flex items-center gap-2 flex-wrap">
+          <Button
+            label="Class Levels Hierarchy"
+            icon="pi pi-th-large"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="activeTab = 'class-levels'"
+            title="Navigate to Class Levels management hierarchy"
+          />
+          <Button
+            v-if="canManageAcademics"
+            label="Add Section"
+            icon="pi pi-plus"
+            size="small"
+            class="brand-gradient-bg border-none"
+            @click="openAddSectionModal()"
+          />
+        </div>
       </div>
 
       <DataTable :value="classStructures" :loading="loading" responsiveLayout="scroll" class="p-datatable-sm custom-table">
@@ -1274,24 +1445,51 @@ onMounted(() => {
             <span class="font-mono font-bold text-emerald-700">#{{ data.numeric_level }}</span>
           </template>
         </Column>
-        <Column field="grade" header="Grade Level">
+        <Column field="grade" header="Grade Level" style="min-width: 160px">
           <template #body="{ data }">
-            <span class="font-bold text-slate-800">{{ data.grade }}</span>
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-slate-800">{{ data.grade }}</span>
+              <button
+                v-if="canManageAcademics"
+                type="button"
+                class="edit-icon-btn"
+                @click="openEditClassModal(data)"
+                title="Edit this Class Level"
+              >
+                <i class="pi pi-pencil text-[11px]"></i>
+              </button>
+            </div>
           </template>
         </Column>
-        <Column field="medium" header="Mediums"></Column>
-        <Column field="shifts" header="Shifts"></Column>
-        <Column header="Allocated Sections / Arms">
+        <Column field="medium" header="Mediums" style="min-width: 140px"></Column>
+        <Column field="shifts" header="Shifts" style="min-width: 140px"></Column>
+        <Column header="Allocated Sections / Arms" style="min-width: 260px">
           <template #body="{ data }">
-            <div class="flex flex-wrap gap-1">
-              <span
+            <div class="flex flex-wrap gap-1.5 items-center">
+              <button
                 v-for="s in data.sections"
                 :key="s.id"
-                class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200"
+                type="button"
+                class="section-pill-btn group"
+                :class="{ 'cursor-default': !canManageAcademics }"
+                @click="canManageAcademics ? openEditSectionModal(s, data) : null"
+                :title="canManageAcademics ? 'Click to edit section arm' : s.name + ' (' + s.capacity + ' seats)'"
               >
-                {{ s.name }} (Cap: {{ s.capacity }})
-              </span>
-              <span v-if="data.sections.length === 0" class="text-xs text-slate-400">No sections</span>
+                <span class="font-semibold">{{ s.name }}</span>
+                <span class="text-[11px] text-emerald-800/80 font-normal">({{ s.capacity }} seats{{ s.room_number ? ' · ' + s.room_number : '' }})</span>
+                <i v-if="canManageAcademics" class="pi pi-pencil text-[10px] text-emerald-700 opacity-60 group-hover:opacity-100 transition-opacity ml-1"></i>
+              </button>
+              <button
+                v-if="canManageAcademics"
+                type="button"
+                class="mini-add-chip-btn"
+                @click="openAddSectionModal(data.id)"
+                title="Add section arm to this grade"
+              >
+                <i class="pi pi-plus text-[10px]"></i>
+                <span>Add</span>
+              </button>
+              <span v-if="!data.sections || data.sections.length === 0" class="text-xs text-slate-400 italic">No sections</span>
             </div>
           </template>
         </Column>
@@ -1300,15 +1498,36 @@ onMounted(() => {
             <Tag :value="`${data.subjects_count} Subjects`" severity="info" />
           </template>
         </Column>
-        <Column header="Actions" style="width: 120px">
+        <Column header="Actions" style="width: 220px">
           <template #body="{ data }">
-            <Button
-              label="+ Section"
-              size="small"
-              text
-              severity="secondary"
-              @click="openAddSectionModal(data.id)"
-            />
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                class="clean-session-edit-btn"
+                @click="openEditClassModal(data)"
+                title="Edit Class Level"
+              >
+                <i class="pi pi-pencil text-xs"></i>
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                class="clean-session-term-btn"
+                @click="openAddSectionModal(data.id)"
+                title="Add section arm to this class"
+              >
+                <i class="pi pi-plus text-xs"></i>
+                <span>+ Section</span>
+              </button>
+              <button
+                type="button"
+                class="term-row-edit-action text-rose-500 hover:text-rose-700 hover:bg-rose-50 hover:border-rose-200"
+                @click="handleDeleteClass(data)"
+                title="Delete Class Level"
+              >
+                <i class="pi pi-trash text-xs"></i>
+              </button>
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -1333,6 +1552,7 @@ onMounted(() => {
             </option>
           </select>
           <Button
+            v-if="canManageAcademics"
             label="Add Subject"
             icon="pi pi-plus"
             size="small"
@@ -1390,7 +1610,7 @@ onMounted(() => {
             <Tag :value="data.has_practical ? 'Yes' : 'No'" :severity="data.has_practical ? 'warn' : 'secondary'" />
           </template>
         </Column>
-        <Column header="Actions" style="width: 140px">
+        <Column v-if="canManageAcademics" header="Actions" style="width: 140px">
           <template #body="{ data }">
             <div class="flex items-center gap-1.5">
               <button
@@ -1435,6 +1655,7 @@ onMounted(() => {
             </option>
           </select>
           <Button
+            v-if="canManageAcademics"
             label="Register Room"
             icon="pi pi-plus"
             size="small"
@@ -1477,7 +1698,7 @@ onMounted(() => {
             <span class="font-mono font-semibold">{{ data.capacity }} Seats</span>
           </template>
         </Column>
-        <Column header="Actions" style="width: 140px">
+        <Column v-if="canManageAcademics" header="Actions" style="width: 140px">
           <template #body="{ data }">
             <div class="flex items-center gap-1.5">
               <button
@@ -2288,6 +2509,252 @@ onMounted(() => {
             <i v-else class="pi pi-check text-xs"></i>
             <span>{{ sectionSubmitting ? 'Registering...' : 'Register Section Arm' }}</span>
           </button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Edit Section / Arm Dialog -->
+    <Dialog
+      v-model:visible="editSectionDialogVisible"
+      modal
+      :style="{ width: '540px', maxWidth: '96vw' }"
+      class="section-edit-dialog"
+    >
+      <template #header>
+        <div class="modal-header-banner">
+          <div class="modal-header-icon bg-emerald-100 text-emerald-800">
+            <i class="pi pi-pencil"></i>
+          </div>
+          <div class="modal-header-text">
+            <div class="flex items-center gap-2">
+              <h2 class="modal-title">Edit Section / Cohort Arm</h2>
+              <span class="badge-institutional">{{ editingSection?.name || 'Section' }}</span>
+            </div>
+            <p class="modal-subtitle">Update capacity, shift, medium, facility room, or delete if no students enrolled</p>
+          </div>
+        </div>
+      </template>
+
+      <form @submit.prevent="handleUpdateSection" class="flex flex-col gap-4 pt-1">
+        <!-- Target Class Level -->
+        <FormField id="edit_sec_class" label="Target Grade / Class Level" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-book field-icon text-emerald-600"></i>
+            <select
+              id="edit_sec_class"
+              v-model="editSectionForm.class_id"
+              class="clean-input font-semibold"
+              required
+            >
+              <option value="" disabled>Select academic grade level...</option>
+              <option v-for="c in classStructures" :key="c.id" :value="c.id">
+                {{ c.grade }} (Level #{{ c.numeric_level }})
+              </option>
+            </select>
+          </div>
+        </FormField>
+
+        <!-- Section / Arm Name with Quick Presets -->
+        <FormField id="edit_sec_name" label="Section Title / Arm Name" required>
+          <div class="clean-field-wrap">
+            <i class="pi pi-bookmark field-icon text-indigo-500"></i>
+            <input
+              id="edit_sec_name"
+              v-model="editSectionForm.name"
+              type="text"
+              placeholder="e.g. Padma, Meghna, Section A"
+              class="clean-input font-medium"
+              required
+            />
+          </div>
+          <div class="quick-presets">
+            <span class="preset-label">Quick fill:</span>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSectionNamePreset('Padma')"
+            >
+              Padma
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSectionNamePreset('Meghna')"
+            >
+              Meghna
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSectionNamePreset('Jamuna')"
+            >
+              Jamuna
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSectionNamePreset('Section A')"
+            >
+              Section A
+            </button>
+            <button
+              type="button"
+              class="preset-btn"
+              @click="applyEditSectionNamePreset('Section B')"
+            >
+              Section B
+            </button>
+          </div>
+        </FormField>
+
+        <!-- Operational Shift & Curriculum Medium Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="edit_sec_shift" label="Operational Shift" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-clock field-icon text-amber-600"></i>
+              <select
+                id="edit_sec_shift"
+                v-model="editSectionForm.shift_id"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="" disabled>Select shift...</option>
+                <option v-for="sh in shiftsList" :key="sh.id" :value="sh.id">
+                  {{ sh.name }}
+                </option>
+              </select>
+            </div>
+          </FormField>
+
+          <FormField id="edit_sec_medium" label="Instructional Medium" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-globe field-icon text-cyan-600"></i>
+              <select
+                id="edit_sec_medium"
+                v-model="editSectionForm.medium_id"
+                class="clean-input font-medium"
+                required
+              >
+                <option value="" disabled>Select medium...</option>
+                <option v-for="m in mediumsList" :key="m.id" :value="m.id">
+                  {{ m.name }}
+                </option>
+              </select>
+            </div>
+          </FormField>
+        </div>
+
+        <!-- Seating Capacity & Facility Room Allocation Grid -->
+        <div class="grid grid-cols-2 gap-3.5">
+          <FormField id="edit_sec_cap" label="Seat Capacity" required>
+            <div class="clean-field-wrap">
+              <i class="pi pi-users field-icon text-teal-600"></i>
+              <input
+                id="edit_sec_cap"
+                v-model.number="editSectionForm.capacity"
+                type="number"
+                min="1"
+                max="200"
+                placeholder="45"
+                class="clean-input font-mono"
+                required
+              />
+            </div>
+            <div class="quick-presets">
+              <span class="preset-label">Seats:</span>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyEditCapacityPreset(35)"
+              >
+                35
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyEditCapacityPreset(40)"
+              >
+                40
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyEditCapacityPreset(45)"
+              >
+                45
+              </button>
+              <button
+                type="button"
+                class="preset-btn"
+                @click="applyEditCapacityPreset(50)"
+              >
+                50
+              </button>
+            </div>
+          </FormField>
+
+          <FormField id="edit_sec_room" label="Room Allocation">
+            <div class="clean-field-wrap">
+              <i class="pi pi-building field-icon text-violet-600"></i>
+              <input
+                id="edit_sec_room"
+                v-model="editSectionForm.room_number"
+                type="text"
+                list="classroom_options_edit"
+                placeholder="e.g. Room 204"
+                class="clean-input font-mono"
+              />
+              <datalist id="classroom_options_edit">
+                <option v-for="r in roomsList" :key="r.id" :value="r.room_number">
+                  {{ r.building_name }} (Cap: {{ r.capacity }})
+                </option>
+              </datalist>
+            </div>
+          </FormField>
+        </div>
+
+        <!-- Active Section Status Toggle -->
+        <label class="feature-toggle-card flex items-center gap-3" :class="{ selected: editSectionForm.is_active }">
+          <input
+            type="checkbox"
+            v-model="editSectionForm.is_active"
+            class="custom-toggle-checkbox"
+          />
+          <div>
+            <div class="toggle-card-title">Active Section Arm</div>
+            <div class="toggle-card-desc">Active sections are available for student admission, class routine, and attendance tracking</div>
+          </div>
+        </label>
+
+        <!-- Clean Modal Action Footer with Delete Button -->
+        <div class="flex justify-between items-center gap-2 mt-3 pt-3.5 border-t border-slate-200">
+          <button
+            type="button"
+            class="px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors flex items-center gap-1.5"
+            @click="handleDeleteSection"
+            title="Delete Section (requires 0 enrolled students)"
+          >
+            <i class="pi pi-trash text-xs"></i>
+            <span>Delete Section</span>
+          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="modal-btn-cancel"
+              @click="editSectionDialogVisible = false"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="editSectionSubmitting"
+              class="modal-btn-primary"
+            >
+              <i v-if="editSectionSubmitting" class="pi pi-spin pi-spinner text-xs"></i>
+              <i v-else class="pi pi-check text-xs"></i>
+              <span>{{ editSectionSubmitting ? 'Saving Changes...' : 'Save Changes' }}</span>
+            </button>
+          </div>
         </div>
       </form>
     </Dialog>
@@ -3940,6 +4407,69 @@ onMounted(() => {
   background: #059669;
   color: #ffffff;
   border-color: #059669;
+}
+
+.section-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 8px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.section-pill-btn:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(22, 101, 52, 0.1);
+}
+
+.mini-add-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  border: 1px dashed #94a3b8;
+  background: transparent;
+  color: #475569;
+  font-size: 0.725rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mini-add-chip-btn:hover {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #10b981;
+  border-style: solid;
+}
+
+.edit-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.edit-icon-btn:hover {
+  color: #059669;
+  background: #ecfdf5;
 }
 
 .modal-btn-cancel {

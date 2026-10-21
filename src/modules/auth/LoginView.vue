@@ -133,7 +133,10 @@ async function handleLogin() {
       life: 3000,
     })
 
-    const redirect = (route.query.redirect as string) || '/dashboard'
+    const defaultPortal = authStore.persona === 'student'
+      ? '/student/dashboard'
+      : (authStore.persona === 'parent' ? '/parent/dashboard' : '/dashboard')
+    const redirect = (route.query.redirect as string) || defaultPortal
     router.push(redirect)
   } catch (error: any) {
     const message = error.message || error.response?.data?.message || 'Invalid institutional credentials or server unavailable.'

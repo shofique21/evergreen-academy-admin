@@ -188,9 +188,70 @@ async function fetchDashboardData(forceRefresh = false) {
 
 const currentData = computed<DashboardOverviewData>(() => dashboardData.value || fallbackData)
 
+const isTeacher = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher'
+})
+
+const isStudent = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'student' || roles.includes('student') || userType === 'student'
+})
+
+const isParent = computed(() => {
+  if (authStore.isSuperAdmin) return false
+  const roles = authStore.user?.roles ?? []
+  const userType = authStore.user?.user_type
+  if (roles.includes('admin') || roles.includes('super_admin') || userType === 'admin' || userType === 'super_admin') {
+    return false
+  }
+  return authStore.persona === 'parent' || roles.includes('parent') || roles.includes('guardian') || userType === 'parent' || userType === 'guardian'
+})
+
+const canCollectFee = computed(() => {
+  if (isTeacher.value || isStudent.value || isParent.value) return false
+  return authStore.hasPermission('fees.collect') || authStore.isSuperAdmin || (authStore.persona === 'admin' && !isTeacher.value && !isStudent.value && !isParent.value)
+})
+
+const canViewAdmissions = computed(() => {
+  if (isTeacher.value || isStudent.value || isParent.value) return false
+  return authStore.hasPermission('admissions.view') || authStore.hasPermission('admissions.manage') || authStore.isSuperAdmin || (authStore.persona === 'admin' && !isTeacher.value && !isStudent.value && !isParent.value)
+})
+
+const canViewFinancials = computed(() => {
+  if (isTeacher.value || isStudent.value || isParent.value) return false
+  return authStore.hasPermission('fees.collect') || authStore.hasPermission('fees.view') || authStore.isSuperAdmin || (authStore.persona === 'admin' && !isTeacher.value && !isStudent.value && !isParent.value)
+})
+
+const dashboardTitle = computed(() => {
+  return isTeacher.value ? 'Faculty Dashboard' : 'Administrative Command Center'
+})
+
 const welcomeSubtitle = computed(() => {
-  const adminName = authStore.user?.name ? `${authStore.user.name} — ` : ''
-  return `Real-time executive oversight for ${adminName}Evergreen Academy (${currentData.value.summary_date}).`
+  const userName = authStore.user?.name ? `${authStore.user.name} — ` : ''
+  if (isTeacher.value) {
+    return `Academic routine, classes, and instructional oversight for ${userName}Evergreen Academy (${currentData.value.summary_date}).`
+  }
+  return `Real-time executive oversight for ${userName}Evergreen Academy (${currentData.value.summary_date}).`
+})
+
+const filteredOperationalAlerts = computed(() => {
+  return currentData.value.operational_alerts.filter((alert) => {
+    if (isTeacher.value && (alert.type === 'overdue_dues' || alert.type === 'admissions_pipeline' || alert.type.includes('fee') || alert.type.includes('invoice'))) {
+      return false
+    }
+    return true
+  })
 })
 
 // Recent Invoices Sample for quick action table
@@ -211,6 +272,14 @@ function sendPaymentReminder(invoiceId: string, contact: string) {
 }
 
 onMounted(() => {
+  if (authStore.persona === 'student' || authStore.hasRole('student')) {
+    router.replace({ name: 'student-dashboard' })
+    return
+  }
+  if (authStore.persona === 'parent' || authStore.hasRole('parent') || authStore.hasRole('guardian')) {
+    router.replace({ name: 'parent-dashboard' })
+    return
+  }
   fetchDashboardData()
 })
 </script>
@@ -219,7 +288,7 @@ onMounted(() => {
   <div class="dashboard-page-container">
     <!-- Header Section with Live Status & Quick Action Buttons -->
     <PageHeader
-      title="Administrative Command Center"
+      :title="dashboardTitle"
       :subtitle="welcomeSubtitle"
       icon="pi pi-th-large"
     >
@@ -238,6 +307,7 @@ onMounted(() => {
         />
 
         <AppButton
+          v-if="!isTeacher && !isStudent && !isParent && canCollectFee"
           label="Collect Fee"
           icon="pi pi-wallet"
           severity="success"
@@ -245,10 +315,28 @@ onMounted(() => {
         />
 
         <AppButton
+          v-if="!isTeacher && !isStudent && !isParent && canViewAdmissions"
           label="Admissions"
           icon="pi pi-user-plus"
           severity="primary"
           @click="router.push('/admissions')"
+        />
+
+        <!-- Faculty Quick Actions for Teachers -->
+        <AppButton
+          v-if="isTeacher"
+          label="Take Attendance"
+          icon="pi pi-check-circle"
+          severity="success"
+          @click="router.push('/attendance')"
+        />
+
+        <AppButton
+          v-if="isTeacher"
+          label="View Timetable"
+          icon="pi pi-calendar"
+          severity="primary"
+          @click="router.push('/timetable')"
         />
       </template>
     </PageHeader>
@@ -325,8 +413,8 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Today's Collection Card -->
-        <div class="stat-card finance-stat">
+        <!-- Today's Collection Card (Hidden on Teacher's, Student's, & Parent's Dashboard) -->
+        <div v-if="!isTeacher && !isStudent && !isParent && canViewFinancials" class="stat-card finance-stat">
           <div class="stat-header">
             <span class="stat-label">Fee Collection (Today)</span>
             <div class="stat-icon-wrap bg-amber-50 text-amber-600">
@@ -425,7 +513,7 @@ onMounted(() => {
               <i class="pi pi-chart-bar text-blue-600"></i>
               <h3>Enrollment by Class Level</h3>
             </div>
-            <span class="pipeline-badge">
+            <span v-if="!isTeacher && canViewAdmissions" class="pipeline-badge">
               Admissions: {{ currentData.admissions.pending_count }} Pending
             </span>
           </div>
@@ -455,7 +543,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="admissions-pipeline-summary">
+          <div v-if="!isTeacher && canViewAdmissions" class="admissions-pipeline-summary">
             <div class="pipe-stat">
               <span class="pipe-label">Total Applications</span>
               <span class="pipe-val">{{ currentData.admissions.total_count }}</span>
@@ -472,8 +560,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 3. Financial Receivables & Overdue Invoices Alert Section -->
-      <div class="content-card financial-dues-card">
+      <!-- 3. Financial Receivables & Overdue Invoices Alert Section (Hidden on Teacher's, Student's, & Parent's Dashboard) -->
+      <div v-if="!isTeacher && !isStudent && !isParent && canViewFinancials" class="content-card financial-dues-card">
         <div class="card-head">
           <div class="head-title-wrap">
             <i class="pi pi-exclamation-triangle text-rose-600"></i>
@@ -633,7 +721,7 @@ onMounted(() => {
 
           <div class="alerts-items-list">
             <div
-              v-for="alert in currentData.operational_alerts"
+              v-for="alert in filteredOperationalAlerts"
               :key="alert.id"
               class="alert-box"
               :class="`alert-sev-${alert.severity}`"

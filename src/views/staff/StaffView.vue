@@ -7,13 +7,15 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
 import DataTableWrapper from '@/components/common/DataTableWrapper.vue'
-import type { StaffProfile, Teacher, TeacherAssignment, StaffAttendanceItem, StaffAttendanceSummary } from '@/types'
+import type { StaffProfile, Teacher, TeacherAssignment, StaffAttendanceItem, StaffAttendanceSummary, StaffAttendanceLockInfo } from '@/types'
+import { useAuthStore } from '@/stores/auth'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
 
+const authStore = useAuthStore()
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
 const { requireConfirm } = useConfirmModal()
 
@@ -541,6 +543,19 @@ const attendanceSummary = ref<StaffAttendanceSummary>({
   present_rate: 0,
 })
 
+const attendanceLock = ref<StaffAttendanceLockInfo>({
+  is_locked: false,
+  locked_at: null,
+  locked_by: null,
+  locked_by_user_id: null,
+  remarks: null,
+  can_lock: false,
+})
+const lockingAttendance = ref(false)
+const lockConfirmVisible = ref(false)
+const lockActionType = ref<'lock' | 'unlock'>('lock')
+const lockRemarks = ref('')
+
 const availableDepartments = computed(() => {
   const depts = new Set<string>()
   staffList.value.forEach((s) => {
@@ -595,6 +610,18 @@ async function fetchAttendanceRoster() {
     if (data?.data?.summary) {
       attendanceSummary.value = data.data.summary
     }
+    if (data?.data?.lock) {
+      attendanceLock.value = data.data.lock
+    } else {
+      attendanceLock.value = {
+        is_locked: false,
+        locked_at: null,
+        locked_by: null,
+        locked_by_user_id: null,
+        remarks: null,
+        can_lock: authStore.hasPermission('staff.manage') || authStore.hasPermission('attendance.lock') || authStore.isSuperAdmin,
+      }
+    }
     unsavedAttendanceCount.value = 0
   } catch (err: any) {
     notifyError('Attendance Error', err.response?.data?.message || 'Failed to load staff attendance roster.')
@@ -603,10 +630,43 @@ async function fetchAttendanceRoster() {
   }
 }
 
+function promptToggleLock(action: 'lock' | 'unlock') {
+  lockActionType.value = action
+  lockRemarks.value = ''
+  lockConfirmVisible.value = true
+}
+
+async function confirmToggleLock() {
+  try {
+    lockingAttendance.value = true
+    const willLock = lockActionType.value === 'lock'
+    const { data } = await api.post('/api/v1/staff/attendance/lock', {
+      attendance_date: attendanceDate.value,
+      lock: willLock,
+      remarks: lockRemarks.value.trim() || undefined,
+    })
+
+    notifySuccess(
+      willLock ? 'Attendance Locked' : 'Attendance Unlocked',
+      data?.message || (willLock ? 'Staff & faculty attendance locked.' : 'Staff & faculty attendance unlocked.')
+    )
+    lockConfirmVisible.value = false
+    await fetchAttendanceRoster()
+  } catch (err: any) {
+    notifyError('Lock Action Failed', err.response?.data?.message || 'Failed to update attendance lock state.')
+  } finally {
+    lockingAttendance.value = false
+  }
+}
+
 function setStaffAttendanceStatus(
   item: StaffAttendanceItem,
   status: 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'ON_LEAVE'
 ) {
+  if (attendanceLock.value.is_locked) {
+    notifyWarn('Attendance Locked', `Staff & faculty attendance for ${attendanceDate.value} is locked against modifications.`)
+    return
+  }
   item.status = status
   item.is_marked = true
   if (status === 'PRESENT') {
@@ -627,6 +687,10 @@ function setStaffAttendanceStatus(
 }
 
 function markAllStaffPresent() {
+  if (attendanceLock.value.is_locked) {
+    notifyWarn('Attendance Locked', `Staff & faculty attendance for ${attendanceDate.value} is locked against modifications.`)
+    return
+  }
   attendanceRoster.value.forEach((item) => {
     item.status = 'PRESENT'
     item.is_marked = true
@@ -672,6 +736,10 @@ function recalcSummary() {
 }
 
 async function saveStaffAttendance() {
+  if (attendanceLock.value.is_locked) {
+    notifyWarn('Attendance Locked', `Staff & faculty attendance for ${attendanceDate.value} is locked against modifications.`)
+    return
+  }
   if (attendanceRoster.value.length === 0) return
   try {
     savingAttendance.value = true
@@ -697,6 +765,10 @@ async function saveStaffAttendance() {
 }
 
 async function saveSingleStaffAttendance(item: StaffAttendanceItem) {
+  if (attendanceLock.value.is_locked) {
+    notifyWarn('Attendance Locked', `Staff & faculty attendance for ${attendanceDate.value} is locked against modifications.`)
+    return
+  }
   try {
     const payload = {
       staff_profile_id: item.staff_profile_id,
@@ -1096,6 +1168,15 @@ onMounted(async () => {
             >
               <i class="pi pi-exclamation-circle text-xs text-amber-600"></i> {{ unsavedAttendanceCount }} Unsaved
             </span>
+
+            <!-- Lock Status Badge -->
+            <Tag
+              :value="attendanceLock.is_locked ? 'LOCKED' : 'OPEN'"
+              :severity="attendanceLock.is_locked ? 'danger' : 'success'"
+              :icon="attendanceLock.is_locked ? 'pi pi-lock' : 'pi pi-lock-open'"
+              class="px-2.5 py-1 text-[11px] font-bold tracking-wider uppercase shadow-sm"
+              :title="attendanceLock.is_locked ? 'This attendance date is locked against edits.' : 'This attendance date is open for modifications.'"
+            />
           </div>
 
           <!-- Clean Filters & Search Field -->
@@ -1245,6 +1326,44 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- Locked Attendance Warning Banner -->
+      <div
+        v-if="attendanceLock.is_locked"
+        class="mb-3.5 p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/80 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+      >
+        <div class="flex items-start sm:items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-rose-100 dark:bg-rose-900/80 text-rose-600 dark:text-rose-300 flex items-center justify-center shrink-0">
+            <i class="pi pi-lock text-base"></i>
+          </div>
+          <div>
+            <div class="font-bold text-sm text-rose-900 dark:text-rose-100 flex items-center gap-2">
+              <span>Attendance Locked for {{ attendanceDate }}</span>
+              <span class="text-[11px] font-normal px-2 py-0.5 rounded-full bg-rose-200/70 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200">
+                Read Only
+              </span>
+            </div>
+            <div class="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
+              Locked by <strong>{{ attendanceLock.locked_by || 'Administrator' }}</strong>
+              <span v-if="attendanceLock.locked_at"> on {{ new Date(attendanceLock.locked_at).toLocaleString() }}</span>
+              <span v-if="attendanceLock.remarks" class="italic"> — "{{ attendanceLock.remarks }}"</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="attendanceLock.can_lock" class="shrink-0 flex items-center gap-2">
+          <Button
+            label="Unlock Attendance"
+            icon="pi pi-lock-open"
+            severity="danger"
+            outlined
+            size="small"
+            class="text-xs font-semibold bg-white dark:bg-slate-900 hover:bg-rose-50"
+            :loading="lockingAttendance"
+            @click="promptToggleLock('unlock')"
+          />
+        </div>
+      </div>
+
       <!-- Staff Attendance Roster Table -->
       <div class="table-card glass-panel overflow-hidden border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-sm">
         <div class="p-3.5 bg-slate-50/70 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
@@ -1259,15 +1378,37 @@ onMounted(async () => {
 
           <div class="flex items-center gap-2">
             <Button
+              v-if="attendanceLock.can_lock && attendanceLock.is_locked"
+              label="Unlock Roster"
+              icon="pi pi-lock-open"
+              severity="danger"
+              outlined
+              class="p-button-sm text-xs py-1 font-semibold"
+              :loading="lockingAttendance"
+              @click="promptToggleLock('unlock')"
+            />
+            <Button
+              v-else-if="attendanceLock.can_lock"
+              label="Lock Attendance"
+              icon="pi pi-lock"
+              severity="secondary"
+              outlined
+              class="p-button-sm text-xs py-1 font-semibold"
+              :loading="lockingAttendance"
+              @click="promptToggleLock('lock')"
+            />
+            <Button
               label="Mark All Present"
               icon="pi pi-check-circle"
               class="p-button-outlined p-button-sm border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-xs py-1"
+              :disabled="attendanceLock.is_locked"
               @click="markAllStaffPresent"
             />
             <Button
               label="Save Attendance"
               icon="pi pi-save"
               class="brand-gradient-bg border-none p-button-sm text-xs py-1 font-semibold"
+              :disabled="attendanceLock.is_locked"
               :loading="savingAttendance"
               @click="saveStaffAttendance"
             />
@@ -1351,11 +1492,12 @@ onMounted(async () => {
 
                 <!-- Attendance Status Pill Group -->
                 <td class="py-3 px-3 text-center">
-                  <div class="status-pill-group inline-flex">
+                  <div class="status-pill-group inline-flex" :class="{ 'opacity-60 pointer-events-none': attendanceLock.is_locked }">
                     <button
                       type="button"
                       class="status-pill-btn"
                       :class="{ 'active-present': item.status === 'PRESENT' }"
+                      :disabled="attendanceLock.is_locked"
                       title="Present (On Time)"
                       @click="setStaffAttendanceStatus(item, 'PRESENT')"
                     >
@@ -1365,6 +1507,7 @@ onMounted(async () => {
                       type="button"
                       class="status-pill-btn"
                       :class="{ 'active-late': item.status === 'LATE' }"
+                      :disabled="attendanceLock.is_locked"
                       title="Late Arrival"
                       @click="setStaffAttendanceStatus(item, 'LATE')"
                     >
@@ -1374,6 +1517,7 @@ onMounted(async () => {
                       type="button"
                       class="status-pill-btn"
                       :class="{ 'active-half_day': item.status === 'HALF_DAY' }"
+                      :disabled="attendanceLock.is_locked"
                       title="Half Day"
                       @click="setStaffAttendanceStatus(item, 'HALF_DAY')"
                     >
@@ -1383,6 +1527,7 @@ onMounted(async () => {
                       type="button"
                       class="status-pill-btn"
                       :class="{ 'active-on_leave': item.status === 'ON_LEAVE' }"
+                      :disabled="attendanceLock.is_locked"
                       title="On Leave"
                       @click="setStaffAttendanceStatus(item, 'ON_LEAVE')"
                     >
@@ -1392,6 +1537,7 @@ onMounted(async () => {
                       type="button"
                       class="status-pill-btn"
                       :class="{ 'active-absent': item.status === 'ABSENT' }"
+                      :disabled="attendanceLock.is_locked"
                       title="Absent (Unexcused)"
                       @click="setStaffAttendanceStatus(item, 'ABSENT')"
                     >
@@ -1405,7 +1551,7 @@ onMounted(async () => {
                   <input
                     type="time"
                     v-model="item.in_time"
-                    :disabled="item.status === 'ABSENT' || item.status === 'ON_LEAVE'"
+                    :disabled="attendanceLock.is_locked || item.status === 'ABSENT' || item.status === 'ON_LEAVE'"
                     class="time-input-field"
                     @change="unsavedAttendanceCount++"
                   />
@@ -1416,7 +1562,7 @@ onMounted(async () => {
                   <input
                     type="time"
                     v-model="item.out_time"
-                    :disabled="item.status === 'ABSENT' || item.status === 'ON_LEAVE'"
+                    :disabled="attendanceLock.is_locked || item.status === 'ABSENT' || item.status === 'ON_LEAVE'"
                     class="time-input-field"
                     @change="unsavedAttendanceCount++"
                   />
@@ -1430,6 +1576,7 @@ onMounted(async () => {
                     text
                     rounded
                     size="small"
+                    :disabled="attendanceLock.is_locked"
                     title="Save this staff member's attendance"
                     aria-label="Save Row"
                     @click="saveSingleStaffAttendance(item)"
@@ -2359,6 +2506,71 @@ onMounted(async () => {
           />
         </div>
       </form>
+    </Dialog>
+
+    <!-- Lock / Unlock Attendance Confirmation Dialog -->
+    <Dialog
+      v-model:visible="lockConfirmVisible"
+      modal
+      :header="lockActionType === 'lock' ? 'Lock Staff Attendance' : 'Unlock Staff Attendance'"
+      :style="{ width: '480px', maxWidth: '95vw' }"
+      class="clean-dialog"
+    >
+      <div class="space-y-4 pt-2">
+        <div
+          class="flex items-start gap-3 p-3.5 rounded-xl border text-xs"
+          :class="lockActionType === 'lock' ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-200' : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-200'"
+        >
+          <i :class="lockActionType === 'lock' ? 'pi pi-lock text-xl text-amber-600 dark:text-amber-400' : 'pi pi-lock-open text-xl text-emerald-600 dark:text-emerald-400'" class="shrink-0 mt-0.5"></i>
+          <div>
+            <p v-if="lockActionType === 'lock'" class="font-bold text-sm mb-1 text-slate-900 dark:text-slate-100">
+              Lock roster for {{ attendanceDate }}?
+            </p>
+            <p v-else class="font-bold text-sm mb-1 text-slate-900 dark:text-slate-100">
+              Unlock roster for {{ attendanceDate }}?
+            </p>
+            <p v-if="lockActionType === 'lock'">
+              Locking prevents any further modifications to staff and faculty attendance for this date. Only authorized administrators will be able to unlock it.
+            </p>
+            <p v-else>
+              Unlocking allows attendance records for this date to be modified again.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            Reason / Remarks (Optional)
+          </label>
+          <InputText
+            v-model="lockRemarks"
+            placeholder="e.g. Daily verification completed by Principal"
+            class="w-full text-xs"
+            :disabled="lockingAttendance"
+          />
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+          <Button
+            label="Cancel"
+            severity="secondary"
+            text
+            size="small"
+            :disabled="lockingAttendance"
+            @click="lockConfirmVisible = false"
+          />
+          <Button
+            :label="lockActionType === 'lock' ? 'Lock Attendance' : 'Unlock Attendance'"
+            :icon="lockActionType === 'lock' ? 'pi pi-lock' : 'pi pi-lock-open'"
+            :severity="lockActionType === 'lock' ? 'danger' : 'success'"
+            size="small"
+            :loading="lockingAttendance"
+            @click="confirmToggleLock"
+          />
+        </div>
+      </template>
     </Dialog>
   </div>
 </template>

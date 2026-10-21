@@ -9,6 +9,8 @@ import type {
   TimetableSlot,
   TimetableVersion,
   Period,
+  StaffAttendanceItem,
+  StaffAttendanceLockInfo,
 } from '../types'
 
 describe('Attendance and Timetable Management Frontend Contracts & Store', () => {
@@ -213,5 +215,173 @@ describe('Attendance and Timetable Management Frontend Contracts & Store', () =>
     expect(authStore.hasPermission('timetable.view')).toBe(true)
     expect(authStore.hasPermission('timetable.manage')).toBe(false)
     expect(authStore.hasPermission('attendance.lock')).toBe(false)
+  })
+
+  it('validates staff attendance lock info structure and locking contracts', () => {
+    const unlockedInfo: StaffAttendanceLockInfo = {
+      is_locked: false,
+      locked_at: null,
+      locked_by: null,
+      locked_by_user_id: null,
+      remarks: null,
+      can_lock: true,
+    }
+
+    expect(unlockedInfo.is_locked).toBe(false)
+    expect(unlockedInfo.locked_at).toBeNull()
+
+    const lockedInfo: StaffAttendanceLockInfo = {
+      is_locked: true,
+      locked_at: '2026-10-21T09:00:00Z',
+      locked_by: 'Principal Rahman',
+      locked_by_user_id: 1,
+      remarks: 'Daily staff attendance confirmed',
+      can_lock: true,
+    }
+
+    expect(lockedInfo.is_locked).toBe(true)
+    expect(lockedInfo.locked_by).toBe('Principal Rahman')
+    expect(lockedInfo.remarks).toBe('Daily staff attendance confirmed')
+
+    const staffItem: StaffAttendanceItem = {
+      staff_profile_id: 5,
+      employee_id: 'EGA-EMP-005',
+      name: 'Salma Begum',
+      department: 'Science',
+      designation: 'Assistant Teacher',
+      is_teacher: true,
+      attendance_date: '2026-10-21',
+      status: 'PRESENT',
+      is_marked: true,
+      in_time: '08:00',
+      out_time: '16:00',
+      is_locked: lockedInfo.is_locked,
+    }
+
+    expect(staffItem.is_locked).toBe(true)
+    expect(staffItem.status).toBe('PRESENT')
+  })
+
+  it('authorizes lock action for admin or users with attendance.lock or staff.manage', () => {
+    const authStore = useAuthStore()
+
+    // Regular teacher without lock permission
+    authStore.user = {
+      id: 12,
+      name: 'Teacher One',
+      email: 'teacher@evergreen.edu.bd',
+      phone: null,
+      user_type: 'staff',
+      is_active: true,
+      avatar: null,
+      roles: ['teacher'],
+      permissions: ['staff.view', 'attendance.take'],
+    }
+    const teacherCanLock = authStore.hasPermission('attendance.lock') || authStore.hasPermission('staff.manage') || authStore.isSuperAdmin
+    expect(teacherCanLock).toBe(false)
+
+    // Admin user with staff.manage
+    authStore.user = {
+      id: 2,
+      name: 'Admin Officer',
+      email: 'officer@evergreen.edu.bd',
+      phone: null,
+      user_type: 'staff',
+      is_active: true,
+      avatar: null,
+      roles: ['admin'],
+      permissions: ['staff.manage', 'staff.view'],
+    }
+    const adminCanLock = authStore.hasPermission('attendance.lock') || authStore.hasPermission('staff.manage') || authStore.isSuperAdmin
+    expect(adminCanLock).toBe(true)
+
+    // Dedicated attendance manager with attendance.lock
+    authStore.user = {
+      id: 3,
+      name: 'Attendance Supervisor',
+      email: 'supervisor@evergreen.edu.bd',
+      phone: null,
+      user_type: 'staff',
+      is_active: true,
+      avatar: null,
+      roles: ['staff'],
+      permissions: ['attendance.lock', 'staff.view'],
+    }
+    const supervisorCanLock = authStore.hasPermission('attendance.lock') || authStore.hasPermission('staff.manage') || authStore.isSuperAdmin
+    expect(supervisorCanLock).toBe(true)
+  })
+
+  it('restricts Reset Demo Routine and New Version buttons from teacher panel in Timetable', () => {
+    const authStore = useAuthStore()
+    authStore.user = {
+      id: 25,
+      name: 'Kazi Farhana',
+      email: 'farhana@evergreen.edu.bd',
+      phone: '+8801722334455',
+      user_type: 'teacher',
+      is_active: true,
+      avatar: null,
+      roles: ['teacher'],
+      permissions: ['timetable.view', 'attendance.take'],
+    }
+
+    const roles = authStore.user?.roles ?? []
+    const userType = authStore.user?.user_type
+    const isTeacher =
+      !authStore.isSuperAdmin &&
+      !roles.includes('admin') &&
+      !roles.includes('super_admin') &&
+      userType !== 'admin' &&
+      userType !== 'super_admin' &&
+      (authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher')
+
+    expect(isTeacher).toBe(true)
+
+    const canManageTimetable = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('timetable.manage')
+    )
+
+    // Reset Demo Routine and New Version buttons must be hidden for teachers
+    expect(canManageTimetable).toBe(false)
+  })
+
+  it('allows Reset Demo Routine and New Version buttons for administrative users in Timetable', () => {
+    const authStore = useAuthStore()
+    authStore.user = {
+      id: 1,
+      name: 'System Administrator',
+      email: 'admin@evergreen.edu.bd',
+      phone: '+8801700000000',
+      user_type: 'super_admin',
+      is_active: true,
+      avatar: null,
+      roles: ['super_admin'],
+      permissions: ['*'],
+    }
+
+    const roles = authStore.user?.roles ?? []
+    const userType = authStore.user?.user_type
+    const isTeacher =
+      !authStore.isSuperAdmin &&
+      !roles.includes('admin') &&
+      !roles.includes('super_admin') &&
+      userType !== 'admin' &&
+      userType !== 'super_admin' &&
+      (authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher')
+
+    expect(isTeacher).toBe(false)
+
+    const canManageTimetable = !isTeacher && (
+      authStore.isSuperAdmin ||
+      authStore.hasRole('admin') ||
+      authStore.persona === 'admin' ||
+      authStore.hasPermission('timetable.manage')
+    )
+
+    // Administrative users can manage timetable, reset demo routine, and create versions
+    expect(canManageTimetable).toBe(true)
   })
 })

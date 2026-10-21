@@ -39,18 +39,20 @@ export interface ExamCandidate {
 const authStore = useAuthStore()
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
 
-// Tab state: 'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'
-const activeTab = ref<'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'>('exams')
-const loading = ref(false)
-const seedingDemo = ref(false)
-const autoFillingMarks = ref(false)
-const approvingAll = ref(false)
-
 // Role detection
 const isTeacher = computed(() => authStore.hasRole('teacher') && !authStore.hasRole('admin') && !authStore.hasRole('super_admin'))
 const isStudentOrParent = computed(() => authStore.hasRole('student') || authStore.hasRole('parent'))
 const canManageExams = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('exam_controller') || authStore.hasPermission('exams.manage'))
 const canApproveOrPublish = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('exam_controller') || authStore.hasPermission('marks.publish'))
+
+// Tab state: 'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'
+const activeTab = ref<'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'>(
+  isStudentOrParent.value ? 'reportCard' : 'exams'
+)
+const loading = ref(false)
+const seedingDemo = ref(false)
+const autoFillingMarks = ref(false)
+const approvingAll = ref(false)
 
 // Metadata
 const examsList = ref<Exam[]>([])
@@ -283,6 +285,7 @@ async function fetchInitialData() {
     }
 
     if (isStudentOrParent.value) {
+      activeTab.value = 'reportCard'
       await fetchMyResults()
     }
   } catch (err: any) {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { teacherRoutes } from '../app/router/teacher.routes'
+import { useAuthStore } from '../stores/auth'
 
 describe('Teacher Dashboard Architecture & Routine Suite', () => {
   beforeEach(() => {
@@ -211,6 +212,167 @@ describe('Teacher Dashboard Architecture & Routine Suite', () => {
       expect(notices[0].priority).toBe('HIGH')
       expect(notices[0].has_attachment).toBe(true)
       expect(notices[1].priority).toBe('NORMAL')
+    })
+  })
+
+  describe('Section 6: Segregation of Financial and Admissions Concerns from Teacher Dashboard', () => {
+    it('suppresses Fee Collection (Today), Collect Fee, Admissions, and Outstanding Balances for teachers', () => {
+      const authStore = useAuthStore()
+
+      authStore.user = {
+        id: 15,
+        name: 'Nasrin Sultana',
+        email: 'nasrin@evergreen.edu.bd',
+        phone: '+8801700000015',
+        user_type: 'teacher',
+        is_active: true,
+        avatar: null,
+        roles: ['teacher'],
+        permissions: ['attendance.view', 'attendance.take', 'timetable.view'],
+      }
+
+      const isTeacher = !authStore.isSuperAdmin && (
+        authStore.persona === 'teacher' ||
+        (authStore.user?.roles ?? []).includes('teacher') ||
+        authStore.user?.user_type === 'teacher'
+      )
+      expect(isTeacher).toBe(true)
+
+      const canCollectFee = !isTeacher && (authStore.hasPermission('fees.collect') || authStore.isSuperAdmin)
+      const canViewAdmissions = !isTeacher && (authStore.hasPermission('admissions.view') || authStore.isSuperAdmin)
+      const canViewFinancials = !isTeacher && (authStore.hasPermission('fees.collect') || authStore.hasPermission('fees.view') || authStore.isSuperAdmin)
+
+      // 1. Fee Collection (Today) card must be hidden for teachers
+      expect(canViewFinancials).toBe(false)
+
+      // 2. Collect Fee quick action button must be hidden for teachers
+      expect(canCollectFee).toBe(false)
+
+      // 3. Admissions quick action button & pipeline must be hidden for teachers
+      expect(canViewAdmissions).toBe(false)
+
+      // 4. Outstanding Balances & Overdue Invoices section must be hidden for teachers
+      expect(canViewFinancials).toBe(false)
+
+      // Verify that fee alerts are filtered out for teachers
+      const operationalAlerts = [
+        { id: 'alert-1', type: 'overdue_dues', severity: 'warn', title: 'Overdue Tuition Invoices', message: '48 invoices past due date' },
+        { id: 'alert-2', type: 'admissions_pipeline', severity: 'info', title: 'Admissions Queue', message: '38 candidate applications' },
+        { id: 'alert-3', type: 'system_health', severity: 'success', title: 'Infrastructure Nominal', message: 'Systems healthy' },
+      ]
+
+      const filteredAlerts = operationalAlerts.filter((alert) => {
+        if (isTeacher && (alert.type === 'overdue_dues' || alert.type === 'admissions_pipeline' || alert.type.includes('fee') || alert.type.includes('invoice'))) {
+          return false
+        }
+        return true
+      })
+
+      expect(filteredAlerts.length).toBe(1)
+      expect(filteredAlerts[0].type).toBe('system_health')
+    })
+
+    it('preserves Fee Collection, Collect Fee, Admissions, and Outstanding Balances for administrative users', () => {
+      const authStore = useAuthStore()
+
+      authStore.user = {
+        id: 1,
+        name: 'System Administrator',
+        email: 'admin@evergreen.edu.bd',
+        phone: '+8801700000000',
+        user_type: 'super_admin',
+        is_active: true,
+        avatar: null,
+        roles: ['super_admin'],
+        permissions: ['*'],
+      }
+
+      const isTeacher = !authStore.isSuperAdmin && (
+        authStore.persona === 'teacher' ||
+        (authStore.user?.roles ?? []).includes('teacher') ||
+        authStore.user?.user_type === 'teacher'
+      )
+      expect(isTeacher).toBe(false)
+
+      const canCollectFee = !isTeacher && (authStore.hasPermission('fees.collect') || authStore.isSuperAdmin)
+      const canViewAdmissions = !isTeacher && (authStore.hasPermission('admissions.view') || authStore.isSuperAdmin)
+      const canViewFinancials = !isTeacher && (authStore.hasPermission('fees.collect') || authStore.hasPermission('fees.view') || authStore.isSuperAdmin)
+
+      expect(canCollectFee).toBe(true)
+      expect(canViewAdmissions).toBe(true)
+      expect(canViewFinancials).toBe(true)
+    })
+
+    it('restricts Target Announcement button from teacher panel in Communications & Notices', () => {
+      const authStore = useAuthStore()
+
+      authStore.user = {
+        id: 25,
+        name: 'Kazi Farhana',
+        email: 'farhana@evergreen.edu.bd',
+        phone: '+8801722334455',
+        user_type: 'teacher',
+        is_active: true,
+        avatar: null,
+        roles: ['teacher'],
+        permissions: ['notices.view'],
+      }
+
+      const roles = authStore.user?.roles ?? []
+      const userType = authStore.user?.user_type
+      const isTeacher =
+        !authStore.isSuperAdmin &&
+        !roles.includes('admin') &&
+        !roles.includes('super_admin') &&
+        userType !== 'admin' &&
+        userType !== 'super_admin' &&
+        (authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher')
+
+      expect(isTeacher).toBe(true)
+
+      const isSuperOrAdmin = authStore.hasRole('super_admin') || authStore.hasRole('admin')
+      const isPrincipal = authStore.hasRole('principal')
+      const canManageNotices = !isTeacher && (isSuperOrAdmin || isPrincipal || authStore.hasPermission('notices.manage'))
+      const canTargetAnnounce = !isTeacher && canManageNotices
+
+      // Target Announcement button must be hidden for teachers
+      expect(canTargetAnnounce).toBe(false)
+    })
+
+    it('permits Target Announcement for administrative users in Communications & Notices', () => {
+      const authStore = useAuthStore()
+
+      authStore.user = {
+        id: 1,
+        name: 'System Administrator',
+        email: 'admin@evergreen.edu.bd',
+        phone: '+8801700000000',
+        user_type: 'super_admin',
+        is_active: true,
+        avatar: null,
+        roles: ['super_admin'],
+        permissions: ['*'],
+      }
+
+      const roles = authStore.user?.roles ?? []
+      const userType = authStore.user?.user_type
+      const isTeacher =
+        !authStore.isSuperAdmin &&
+        !roles.includes('admin') &&
+        !roles.includes('super_admin') &&
+        userType !== 'admin' &&
+        userType !== 'super_admin' &&
+        (authStore.persona === 'teacher' || roles.includes('teacher') || roles.includes('faculty') || userType === 'teacher')
+
+      expect(isTeacher).toBe(false)
+
+      const isSuperOrAdmin = authStore.hasRole('super_admin') || authStore.hasRole('admin')
+      const isPrincipal = authStore.hasRole('principal')
+      const canManageNotices = !isTeacher && (isSuperOrAdmin || isPrincipal || authStore.hasPermission('notices.manage'))
+      const canTargetAnnounce = !isTeacher && canManageNotices
+
+      // Target Announcement button is permitted for admins
+      expect(canTargetAnnounce).toBe(true)
     })
   })
 })

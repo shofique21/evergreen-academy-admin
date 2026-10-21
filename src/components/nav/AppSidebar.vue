@@ -26,7 +26,7 @@ const healthLoading = ref(false)
 const adminNavItems: NavMenuItem[] = [
   { label: 'Dashboard', icon: 'pi pi-home', to: '/dashboard' },
   { label: 'Admissions', icon: 'pi pi-id-card', to: '/admissions', permission: 'admissions.view' },
-  { label: 'Academics', icon: 'pi pi-book', to: '/academics', permission: 'academic-years.manage' },
+  { label: 'Academics', icon: 'pi pi-book', to: '/academics', permission: 'academics.view' },
   { label: 'Students (SIS)', icon: 'pi pi-users', to: '/students', permission: 'students.view' },
   { label: 'Attendance', icon: 'pi pi-check-circle', to: '/attendance', permission: 'attendance.view' },
   { label: 'Timetable', icon: 'pi pi-calendar', to: '/timetable', permission: 'timetable.view' },
@@ -53,26 +53,20 @@ const teacherNavItems: NavMenuItem[] = [
 ]
 
 const studentNavItems: NavMenuItem[] = [
-  { label: 'Student Portal', icon: 'pi pi-home', to: '/dashboard' },
-  { label: 'My Attendance', icon: 'pi pi-check-circle', to: '/attendance' },
+  { label: 'Student Portal', icon: 'pi pi-home', to: '/student/dashboard' },
   { label: 'Class Timetable', icon: 'pi pi-calendar', to: '/timetable' },
+  { label: 'My Attendance', icon: 'pi pi-check-circle', to: '/attendance' },
   { label: 'Report Cards & Results', icon: 'pi pi-file-edit', to: '/exams' },
   { label: 'Notice Board & Alerts', icon: 'pi pi-megaphone', to: '/communications' },
-  { label: 'My Invoices & Dues', icon: 'pi pi-wallet', to: '/fees' },
-  { label: 'Online Payment', icon: 'pi pi-credit-card', to: '/payments' },
   { label: 'Notifications', icon: 'pi pi-bell', to: '/notifications' },
-  { label: 'My Curriculum', icon: 'pi pi-book', to: '/academics' },
 ]
 
 const parentNavItems: NavMenuItem[] = [
-  { label: 'Guardian Portal', icon: 'pi pi-home', to: '/dashboard' },
+  { label: 'Guardian Portal', icon: 'pi pi-home', to: '/parent/dashboard' },
   { label: 'Child Attendance', icon: 'pi pi-check-circle', to: '/attendance' },
   { label: 'Class Timetable', icon: 'pi pi-calendar', to: '/timetable' },
   { label: 'Child Report Cards', icon: 'pi pi-file-edit', to: '/exams' },
   { label: 'Notice Board & Alerts', icon: 'pi pi-megaphone', to: '/communications' },
-  { label: 'Child Enrollment', icon: 'pi pi-users', to: '/students' },
-  { label: 'Fee Payments', icon: 'pi pi-wallet', to: '/fees' },
-  { label: 'Online Pay (bKash/SSL)', icon: 'pi pi-credit-card', to: '/payments' },
   { label: 'Notifications', icon: 'pi pi-bell', to: '/notifications' },
 ]
 

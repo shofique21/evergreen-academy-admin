@@ -55,6 +55,12 @@ export const teacherRoutes: RouteRecordRaw[] = [
         component: () => import('@/modules/notifications/NotificationsView.vue'),
         meta: { title: 'Teacher Notifications — Evergreen Academy' },
       },
+      {
+        path: 'academics',
+        name: 'teacher-academics',
+        component: () => import('@/views/academics/AcademicsView.vue'),
+        meta: { title: 'Academic Curriculum — Evergreen Academy', permission: 'academics.view' },
+      },
     ],
   },
 ]

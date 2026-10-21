@@ -9,6 +9,10 @@ export const useAuthStore = defineStore('auth', () => {
   const initialized = ref<boolean>(false)
 
   const isAuthenticated = computed(() => !!user.value)
+  const isSuperAdmin = computed(() => {
+    if (!user.value) return false
+    return (user.value.roles ?? []).includes('super_admin') || user.value.user_type === 'super_admin'
+  })
   const userRoles = computed(() => user.value?.roles ?? [])
   const userPermissions = computed(() => user.value?.permissions ?? [])
 
@@ -135,6 +139,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     initialized,
     isAuthenticated,
+    isSuperAdmin,
     userRoles,
     userPermissions,
     persona,

@@ -50,7 +50,7 @@ const routes: RouteRecordRaw[] = [
         path: 'academics',
         name: 'academics',
         component: () => import('@/views/academics/AcademicsView.vue'),
-        meta: { title: 'Academic Structure — Evergreen Academy', permission: 'academic-years.manage' },
+        meta: { title: 'Academic Structure & Curriculum — Evergreen Academy', permission: 'academics.view' },
       },
       {
         path: 'students',
