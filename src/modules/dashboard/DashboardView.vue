@@ -272,11 +272,11 @@ function sendPaymentReminder(invoiceId: string, contact: string) {
 }
 
 onMounted(() => {
-  if (authStore.persona === 'student' || authStore.hasRole('student')) {
+  if (isStudent.value) {
     router.replace({ name: 'student-dashboard' })
     return
   }
-  if (authStore.persona === 'parent' || authStore.hasRole('parent') || authStore.hasRole('guardian')) {
+  if (isParent.value) {
     router.replace({ name: 'parent-dashboard' })
     return
   }

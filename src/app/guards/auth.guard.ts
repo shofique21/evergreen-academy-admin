@@ -23,8 +23,8 @@ export async function authGuard(
   if (to.meta.requiresAuth && !isAuthenticated) {
     result = { name: 'login', query: { redirect: to.fullPath } }
   } else if (to.meta.guestOnly && isAuthenticated) {
-    const userRole = authStore.user?.user_type || 'admin'
-    switch (userRole) {
+    const persona = authStore.persona
+    switch (persona) {
       case 'parent':
         result = { name: 'parent-dashboard' }
         break
@@ -34,6 +34,8 @@ export async function authGuard(
       case 'teacher':
         result = { name: 'teacher-dashboard' }
         break
+      case 'admin':
+      case 'staff':
       default:
         result = { name: 'admin-dashboard' }
         break

@@ -110,6 +110,49 @@ function selectProfile(profile: DemoProfile) {
   form.email = profile.email
   form.password = profile.pass
   errorMessage.value = null
+
+  // Clear any stale cross-role redirect from previous testing sessions
+  if (route.query.redirect) {
+    router.replace({ query: {} })
+  }
+}
+
+function resolveTargetPortal(persona: string, queryRedirect?: string): string {
+  // 1. Determine canonical dashboard for persona
+  let defaultPortal = '/dashboard'
+  if (persona === 'student') {
+    defaultPortal = '/student/dashboard'
+  } else if (persona === 'parent') {
+    defaultPortal = '/parent/dashboard'
+  } else if (persona === 'teacher') {
+    defaultPortal = '/teacher/dashboard'
+  }
+
+  // 2. Validate requested redirect parameter if present
+  if (queryRedirect && typeof queryRedirect === 'string' && queryRedirect.startsWith('/')) {
+    // Avoid redirect loops back to authentication pages
+    if (queryRedirect.startsWith('/auth') || queryRedirect.startsWith('/login')) {
+      return defaultPortal
+    }
+
+    // Role boundary protection: Prevent cross-persona redirect hijacking
+    if (persona === 'student' && !queryRedirect.startsWith('/student')) {
+      return defaultPortal
+    }
+    if (persona === 'parent' && !queryRedirect.startsWith('/parent')) {
+      return defaultPortal
+    }
+    if (persona === 'teacher' && (queryRedirect.startsWith('/student') || queryRedirect.startsWith('/parent'))) {
+      return defaultPortal
+    }
+    if ((persona === 'admin' || persona === 'staff') && (queryRedirect.startsWith('/student') || queryRedirect.startsWith('/parent'))) {
+      return defaultPortal
+    }
+
+    return queryRedirect
+  }
+
+  return defaultPortal
 }
 
 async function handleLogin() {
@@ -133,11 +176,8 @@ async function handleLogin() {
       life: 3000,
     })
 
-    const defaultPortal = authStore.persona === 'student'
-      ? '/student/dashboard'
-      : (authStore.persona === 'parent' ? '/parent/dashboard' : '/dashboard')
-    const redirect = (route.query.redirect as string) || defaultPortal
-    router.push(redirect)
+    const targetPortal = resolveTargetPortal(authStore.persona, route.query.redirect as string | undefined)
+    router.push(targetPortal)
   } catch (error: any) {
     const message = error.message || error.response?.data?.message || 'Invalid institutional credentials or server unavailable.'
     errorMessage.value = message

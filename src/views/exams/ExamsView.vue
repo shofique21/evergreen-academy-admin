@@ -47,8 +47,11 @@ const autoFillingMarks = ref(false)
 const approvingAll = ref(false)
 
 // Role detection
-const isTeacher = computed(() => authStore.hasRole('teacher') && !authStore.hasRole('admin') && !authStore.hasRole('super_admin'))
-const isStudentOrParent = computed(() => authStore.hasRole('student') || authStore.hasRole('parent'))
+const isTeacher = computed(() => (authStore.persona === 'teacher' || authStore.hasExactRole('teacher')) && !authStore.isSuperAdmin && authStore.persona !== 'admin')
+const isStudentOrParent = computed(() => {
+  if (authStore.isSuperAdmin || authStore.persona === 'admin' || authStore.hasExactRole('admin')) return false
+  return authStore.persona === 'student' || authStore.persona === 'parent' || authStore.hasExactRole('student') || authStore.hasExactRole('parent')
+})
 const canManageExams = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('exam_controller') || authStore.hasPermission('exams.manage'))
 const canApproveOrPublish = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('exam_controller') || authStore.hasPermission('marks.publish'))
 

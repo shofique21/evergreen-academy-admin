@@ -95,6 +95,54 @@ describe('App Navigation Guards', () => {
 
       expect(next).toHaveBeenCalledWith({ name: 'parent-dashboard' })
     })
+
+    it('redirects authenticated super_admin from guestOnly route to admin-dashboard', async () => {
+      const authStore = useAuthStore()
+      authStore.user = {
+        id: 5,
+        name: 'Super Admin',
+        email: 'superadmin@evergreen.edu.bd',
+        user_type: 'super_admin',
+        roles: ['super_admin'],
+        permissions: [],
+      } as any
+      authStore.initialized = true
+
+      const to = {
+        meta: { guestOnly: true },
+      } as unknown as RouteLocationNormalized
+
+      const from = {} as RouteLocationNormalized
+      const next = vi.fn()
+
+      await authGuard(to, from, next)
+
+      expect(next).toHaveBeenCalledWith({ name: 'admin-dashboard' })
+    })
+
+    it('redirects authenticated staff/admin from guestOnly route to admin-dashboard even if user_type is staff', async () => {
+      const authStore = useAuthStore()
+      authStore.user = {
+        id: 5,
+        name: 'Office IT Lead',
+        email: 'superadmin@evergreen.edu.bd',
+        user_type: 'staff',
+        roles: ['super_admin'],
+        permissions: [],
+      } as any
+      authStore.initialized = true
+
+      const to = {
+        meta: { guestOnly: true },
+      } as unknown as RouteLocationNormalized
+
+      const from = {} as RouteLocationNormalized
+      const next = vi.fn()
+
+      await authGuard(to, from, next)
+
+      expect(next).toHaveBeenCalledWith({ name: 'admin-dashboard' })
+    })
   })
 
   describe('roleGuard', () => {
