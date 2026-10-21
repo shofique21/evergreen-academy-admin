@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
@@ -13,109 +13,13 @@ const route = useRoute()
 const toast = useToast()
 const authStore = useAuthStore()
 
-interface DemoProfile {
-  id: string
-  roleName: string
-  personName: string
-  email: string
-  pass: string
-  icon: string
-  badgeColor: string
-}
-
-const demoProfiles: DemoProfile[] = [
-  {
-    id: 'super_admin',
-    roleName: 'Super Admin',
-    personName: 'Dr. A. K. Azad',
-    email: 'superadmin@evergreen.edu.bd',
-    pass: 'SuperAdmin123!@#',
-    icon: 'pi-shield',
-    badgeColor: '#10b981',
-  },
-  {
-    id: 'admin',
-    roleName: 'Principal',
-    personName: 'Syed Mahbubur Rahman',
-    email: 'schooladmin@evergreen.edu.bd',
-    pass: 'Admin123!@#',
-    icon: 'pi-building',
-    badgeColor: '#06b6d4',
-  },
-  {
-    id: 'teacher',
-    roleName: 'Faculty',
-    personName: 'Mohammad Rafiqul Islam',
-    email: 'teacher@evergreen.edu.bd',
-    pass: 'Teacher123!@#',
-    icon: 'pi-book',
-    badgeColor: '#3b82f6',
-  },
-  {
-    id: 'accountant',
-    roleName: 'Accountant',
-    personName: 'Farhana Akter',
-    email: 'accountant@evergreen.edu.bd',
-    pass: 'Account123!@#',
-    icon: 'pi-wallet',
-    badgeColor: '#f59e0b',
-  },
-  {
-    id: 'student',
-    roleName: 'Student',
-    personName: 'Tahmidur Rahman',
-    email: 'student@evergreen.edu.bd',
-    pass: 'Student123!@#',
-    icon: 'pi-user',
-    badgeColor: '#8b5cf6',
-  },
-  {
-    id: 'parent',
-    roleName: 'Parent',
-    personName: 'Abdur Rahman',
-    email: 'parent@evergreen.edu.bd',
-    pass: 'Parent123!@#',
-    icon: 'pi-users',
-    badgeColor: '#ec4899',
-  },
-]
-
 const form = reactive({
-  email: 'superadmin@evergreen.edu.bd',
-  password: 'SuperAdmin123!@#',
-  remember: true,
+  email: '',
+  password: '',
+  remember: false,
 })
 
 const errorMessage = ref<string | null>(null)
-const selectedProfileId = ref<string>('super_admin')
-
-function isProfileActive(profile: DemoProfile): boolean {
-  const currentEmail = form.email.trim().toLowerCase()
-  if (profile.id === 'super_admin') {
-    return currentEmail === 'superadmin@evergreen.edu.bd' || currentEmail === 'admin@evergreen.edu.bd'
-  }
-  return currentEmail === profile.email.toLowerCase()
-}
-
-const activeProfile = computed(() => {
-  const currentEmail = form.email.trim().toLowerCase()
-  if (currentEmail === 'superadmin@evergreen.edu.bd' || currentEmail === 'admin@evergreen.edu.bd') {
-    return demoProfiles.find((p) => p.id === 'super_admin')
-  }
-  return demoProfiles.find((p) => p.email.toLowerCase() === currentEmail)
-})
-
-function selectProfile(profile: DemoProfile) {
-  selectedProfileId.value = profile.id
-  form.email = profile.email
-  form.password = profile.pass
-  errorMessage.value = null
-
-  // Clear any stale cross-role redirect from previous testing sessions
-  if (route.query.redirect) {
-    router.replace({ query: {} })
-  }
-}
 
 function resolveTargetPortal(persona: string, queryRedirect?: string): string {
   // 1. Determine canonical dashboard for persona
@@ -158,87 +62,82 @@ function resolveTargetPortal(persona: string, queryRedirect?: string): string {
 async function handleLogin() {
   errorMessage.value = null
   if (!form.email || !form.password) {
-    errorMessage.value = 'Please provide both institutional email and password.'
+    errorMessage.value = 'Please enter your email and password.'
     return
   }
 
   try {
-    await authStore.login({
+    const result = await authStore.login({
       email: form.email,
       password: form.password,
       remember: form.remember,
     })
 
+    // Two-factor accounts continue to the code step; nobody is signed in yet.
+    if (result === 'MFA_REQUIRED') {
+      router.push({ name: 'auth-mfa', query: route.query.redirect ? { redirect: route.query.redirect } : {} })
+      return
+    }
+
     toast.add({
       severity: 'success',
-      summary: 'Authentication Successful',
-      detail: `Welcome back, ${authStore.user?.name || 'Administrator'}`,
+      summary: 'Signed in',
+      detail: `Welcome back, ${authStore.user?.name || ''}`.trim(),
       life: 3000,
     })
 
     const targetPortal = resolveTargetPortal(authStore.persona, route.query.redirect as string | undefined)
     router.push(targetPortal)
-  } catch (error: any) {
-    const message = error.message || error.response?.data?.message || 'Invalid institutional credentials or server unavailable.'
+  } catch (error: unknown) {
+    const message = (error as { message?: string })?.message || 'Incorrect email or password, or the server is unavailable.'
     errorMessage.value = message
-    toast.add({
-      severity: 'error',
-      summary: 'Login Failed',
-      detail: message,
-      life: 5000,
-    })
+    form.password = ''
   }
 }
 </script>
 
 <template>
   <div class="login-master-card">
-    <!-- LEFT PANEL: Institutional Intelligence & Showcase -->
+    <!-- LEFT PANEL: School introduction -->
     <div class="showcase-panel">
       <div class="showcase-bg-pattern"></div>
       <div class="showcase-glow"></div>
 
       <div class="showcase-content">
-        <!-- Top Institutional Crest -->
         <div class="crest-header">
           <div class="crest-symbol">
-            <i class="pi pi-verified"></i>
+            <i class="pi pi-building-columns"></i>
           </div>
-          <div>
-            <span class="accreditation-label">Ministry of Education & BISE Accredited</span>
-            <div class="institution-name">Evergreen Institutional Core</div>
-          </div>
+          <div class="institution-name">Evergreen Academy</div>
         </div>
 
-        <!-- Headline & Value Prop -->
         <div class="showcase-hero">
           <h1 class="hero-heading">
-            Next-Generation <span class="gradient-text">School Governance</span> & Academic Precision
+            School management, <span class="gradient-text">in one place</span>
           </h1>
           <p class="hero-lead">
-            Bangladesh’s unified School Management System. Orchestrating NCTB grading, automated tabulation, real-time biometrics, and tokenized payments.
+            Admissions, attendance, exams and results, fees and payments — for staff, teachers, students and parents.
           </p>
         </div>
 
-        <!-- Interactive Core Pillar Cards -->
         <div class="pillars-list">
           <div class="pillar-item">
             <div class="pillar-icon-box">
               <i class="pi pi-file-edit"></i>
             </div>
             <div class="pillar-text">
-              <span class="pillar-title">NCTB Tabulation Engine</span>
-              <p class="pillar-desc">Continuous assessments, GPA 5.0 rulebooks & instant transcript generation.</p>
+              <span class="pillar-title">Exams &amp; results</span>
+              <p class="pillar-desc">Mark entry, GPA calculation and published report cards.</p>
             </div>
           </div>
 
           <div class="pillar-item">
             <div class="pillar-icon-box">
-              <i class="pi pi-clock"></i>
+              <i class="pi pi-calendar"></i>
             </div>
             <div class="pillar-text">
-              <span class="pillar-title">Smart Attendance & SMS</span>
-              <p class="pillar-desc">RFID & biometric roll-calls with instant automated notifications to guardians.</p>
+              <span class="pillar-title">Attendance &amp; timetable</span>
+              <p class="pillar-desc">Daily attendance and class routines for every section.</p>
             </div>
           </div>
 
@@ -247,93 +146,34 @@ async function handleLogin() {
               <i class="pi pi-credit-card"></i>
             </div>
             <div class="pillar-text">
-              <span class="pillar-title">Tokenized Gateway Checkout</span>
-              <p class="pillar-desc">bKash & SSLCommerz multi-channel settlement with automated ledger reconciliation.</p>
+              <span class="pillar-title">Fees &amp; payments</span>
+              <p class="pillar-desc">Invoices, scholarships and waivers, cash and online payments.</p>
             </div>
-          </div>
-        </div>
-
-        <!-- Live Institutional Statistics -->
-        <div class="stats-ribbon">
-          <div class="stat-cell">
-            <span class="stat-number">1</span>
-            <span class="stat-caption">School Campus</span>
-          </div>
-          <div class="stat-divider"></div>
-          <div class="stat-cell">
-            <span class="stat-number">4,850+</span>
-            <span class="stat-caption">Active Students</span>
-          </div>
-          <div class="stat-divider"></div>
-          <div class="stat-cell">
-            <span class="stat-number">99.9%</span>
-            <span class="stat-caption">Core Uptime</span>
-          </div>
-          <div class="stat-divider"></div>
-          <div class="stat-cell">
-            <span class="stat-number">GPA 5.0</span>
-            <span class="stat-caption">NCTB Engine</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- RIGHT PANEL: Authentication Gateway -->
+    <!-- RIGHT PANEL: Sign in -->
     <div class="auth-panel">
       <div class="auth-box">
-        <!-- Portal Header -->
         <div class="auth-header-box">
-          <div class="auth-badge">
-            <i class="pi pi-lock-open"></i>
-            <span>SECURE ACCESS PORTAL</span>
-          </div>
-          <h2 class="auth-title">Sign In to Workspace</h2>
-          <p class="auth-desc">Select a verified role profile or enter your institutional credentials:</p>
+          <h2 class="auth-title">Sign in</h2>
+          <p class="auth-desc">Use the email and password given to you by the school.</p>
         </div>
 
-        <!-- Quick Role Switcher -->
-        <div class="role-selector-container">
-          <div class="role-selector-header">
-            <span class="role-label"><i class="pi pi-users text-xs"></i> Quick-Access Profiles:</span>
-            <span v-if="activeProfile" class="profile-preview-badge">
-              {{ activeProfile.personName }}
-            </span>
-          </div>
-
-          <div class="role-grid">
-            <button
-              v-for="profile in demoProfiles"
-              :key="profile.id"
-              type="button"
-              class="role-card-btn"
-              :class="{ active: isProfileActive(profile) }"
-              @click="selectProfile(profile)"
-            >
-              <div class="role-btn-top">
-                <i :class="['pi', profile.icon, 'role-icon']" :style="{ color: profile.badgeColor }"></i>
-                <i v-if="isProfileActive(profile)" class="pi pi-check-circle role-check"></i>
-              </div>
-              <span class="role-card-title">{{ profile.roleName }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Error Notification -->
-        <div v-if="errorMessage" class="error-banner">
+        <div v-if="errorMessage" class="error-banner" role="alert">
           <i class="pi pi-exclamation-triangle error-icon"></i>
           <div class="error-body">
-            <span class="error-title">Authentication Error</span>
+            <span class="error-title">Could not sign in</span>
             <p class="error-text">{{ errorMessage }}</p>
           </div>
         </div>
 
-        <!-- Form Fields -->
         <form @submit.prevent="handleLogin" class="login-form">
-          <!-- Email Input -->
           <div class="input-field-group">
             <label for="email" class="field-label">
-              <span>Institutional Email</span>
-              <span class="required-star">*</span>
+              <span>Email</span>
             </label>
             <div class="field-wrapper">
               <i class="pi pi-envelope field-icon"></i>
@@ -341,20 +181,18 @@ async function handleLogin() {
                 id="email"
                 v-model="form.email"
                 type="email"
-                placeholder="username@evergreen.edu.bd"
+                placeholder="name@evergreen.edu.bd"
                 class="lux-input w-full"
                 required
-                autocomplete="email"
+                autocomplete="username"
               />
             </div>
           </div>
 
-          <!-- Password Input -->
           <div class="input-field-group">
             <div class="field-label-row">
               <label for="password" class="field-label">
-                <span>Security Password</span>
-                <span class="required-star">*</span>
+                <span>Password</span>
               </label>
               <router-link to="/auth/forgot-password" class="forgot-pwd-link">
                 Forgot password?
@@ -365,7 +203,6 @@ async function handleLogin() {
               <Password
                 id="password"
                 v-model="form.password"
-                placeholder="••••••••••••"
                 :feedback="false"
                 toggleMask
                 class="lux-password w-full"
@@ -376,34 +213,26 @@ async function handleLogin() {
             </div>
           </div>
 
-          <!-- Checkbox Options -->
           <div class="remember-row">
             <div class="checkbox-container">
-              <Checkbox id="remember" v-model="form.remember" :binary="true" />
+              <Checkbox inputId="remember" v-model="form.remember" :binary="true" />
               <label for="remember" class="remember-text">
-                Keep me signed in on this workstation
+                Keep me signed in on this device
               </label>
             </div>
           </div>
 
-          <!-- Submit Button -->
           <Button
             type="submit"
             :loading="authStore.loading"
             class="submit-action-btn"
           >
             <div class="btn-inner">
-              <span class="btn-text">Sign In to Workspace</span>
+              <span class="btn-text">Sign in</span>
               <i class="pi pi-arrow-right btn-arrow"></i>
             </div>
           </Button>
         </form>
-
-        <!-- Compliance & Security Footnote -->
-        <div class="auth-card-footnote">
-          <i class="pi pi-shield sec-shield-icon"></i>
-          <span>Protected by 256-bit TLS • Laravel Sanctum Secure Session</span>
-        </div>
       </div>
     </div>
   </div>
@@ -489,15 +318,6 @@ async function handleLogin() {
   justify-content: center;
   font-size: 1.25rem;
   box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
-}
-
-.accreditation-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #a7f3d0;
-  display: block;
 }
 
 .institution-name {
@@ -592,42 +412,6 @@ async function handleLogin() {
   margin: 0;
 }
 
-/* Stats Ribbon */
-.stats-ribbon {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 0.85rem 1.25rem;
-}
-
-.stat-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.stat-number {
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: #34d399;
-  letter-spacing: -0.02em;
-}
-
-.stat-caption {
-  font-size: 0.7rem;
-  color: #94a3b8;
-  font-weight: 500;
-}
-
-.stat-divider {
-  width: 1px;
-  height: 28px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
 /* =========================================
    RIGHT PANEL: AUTHENTICATION FORM
    ========================================= */
@@ -655,21 +439,6 @@ async function handleLogin() {
   gap: 0.4rem;
 }
 
-.auth-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: fit-content;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 0.25rem 0.65rem;
-  border-radius: 9999px;
-  font-size: 0.685rem;
-  font-weight: 700;
-  color: #34d399;
-  letter-spacing: 0.06em;
-}
-
 .auth-title {
   font-size: 1.7rem;
   font-weight: 800;
@@ -681,100 +450,6 @@ async function handleLogin() {
   font-size: 0.865rem;
   color: #94a3b8;
   line-height: 1.45;
-}
-
-/* Role Selector */
-.role-selector-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 0.85rem 1rem;
-}
-
-.role-selector-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.role-label {
-  font-size: 0.725rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.profile-preview-badge {
-  font-size: 0.725rem;
-  font-weight: 600;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.25);
-  padding: 0.15rem 0.5rem;
-  border-radius: 6px;
-  max-width: 190px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.role-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-}
-
-.role-card-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  padding: 0.5rem 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  text-align: left;
-}
-
-.role-card-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.25);
-  transform: translateY(-2px);
-}
-
-.role-card-btn.active {
-  background: rgba(16, 185, 129, 0.16);
-  border-color: #10b981;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
-}
-
-.role-btn-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.role-icon {
-  font-size: 0.95rem;
-}
-
-.role-check {
-  font-size: 0.75rem;
-  color: #34d399;
-}
-
-.role-card-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #e2e8f0;
 }
 
 /* Error Banner */
@@ -848,10 +523,6 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-}
-
-.required-star {
-  color: #ef4444;
 }
 
 .forgot-pwd-link {
@@ -999,24 +670,6 @@ async function handleLogin() {
   transform: translateX(4px);
 }
 
-/* Footnote */
-.auth-card-footnote {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  font-size: 0.735rem;
-  color: #64748b;
-  text-align: center;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.sec-shield-icon {
-  color: #10b981;
-  font-size: 0.85rem;
-}
-
 /* =========================================
    RESPONSIVE DESIGN
    ========================================= */
@@ -1048,18 +701,8 @@ async function handleLogin() {
   .auth-panel {
     padding: 2rem 1.25rem;
   }
-  .role-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .hero-heading {
     font-size: 1.45rem;
-  }
-  .stats-ribbon {
-    gap: 0.5rem;
-    padding: 0.65rem 0.85rem;
-  }
-  .stat-number {
-    font-size: 0.95rem;
   }
 }
 </style>

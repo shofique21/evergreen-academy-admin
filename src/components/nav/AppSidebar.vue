@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import api from '@/services/api'
-import type { NavMenuItem, SystemHealth } from '@/types'
+import type { NavMenuItem } from '@/types'
 
 const props = defineProps<{
   collapsed: boolean
@@ -19,55 +18,50 @@ const emit = defineEmits<{
 const route = useRoute()
 const authStore = useAuthStore()
 
-const healthData = ref<SystemHealth | null>(null)
-const healthLoading = ref(false)
-
 // Navigation items partitioned by persona
 const adminNavItems: NavMenuItem[] = [
   { label: 'Dashboard', icon: 'pi pi-home', to: '/dashboard' },
   { label: 'Admissions', icon: 'pi pi-id-card', to: '/admissions', permission: 'admissions.view' },
   { label: 'Academics', icon: 'pi pi-book', to: '/academics', permission: 'academics.view' },
-  { label: 'Students (SIS)', icon: 'pi pi-users', to: '/students', permission: 'students.view' },
+  { label: 'Students', icon: 'pi pi-users', to: '/students', permission: 'students.view' },
   { label: 'Attendance', icon: 'pi pi-check-circle', to: '/attendance', permission: 'attendance.view' },
   { label: 'Timetable', icon: 'pi pi-calendar', to: '/timetable', permission: 'timetable.view' },
-  { label: 'Examinations & Results', icon: 'pi pi-file-edit', to: '/exams' },
-  { label: 'Communications & Notices', icon: 'pi pi-megaphone', to: '/communications' },
-  { label: 'Staff & Faculty', icon: 'pi pi-briefcase', to: '/staff', permission: 'staff.view' },
-  { label: 'Users & Roles', icon: 'pi pi-user-plus', to: '/users', permission: 'users.view' },
-  { label: 'Finance Management', icon: 'pi pi-wallet', to: '/fees', permission: 'fees.collect' },
-  { label: 'Payments & Gateway', icon: 'pi pi-credit-card', to: '/payments' },
-  { label: 'Notification Center', icon: 'pi pi-bell', to: '/notifications' },
-  { label: 'Reports & Exports', icon: 'pi pi-file-excel', to: '/reports' },
-  { label: 'System Settings', icon: 'pi pi-cog', to: '/settings', permission: 'settings.view' },
+  { label: 'Exams & Results', icon: 'pi pi-file-edit', to: '/exams' },
+  { label: 'Notices', icon: 'pi pi-megaphone', to: '/communications' },
+  { label: 'Staff', icon: 'pi pi-briefcase', to: '/staff', permission: 'staff.view' },
+  { label: 'Users', icon: 'pi pi-user-plus', to: '/users', permission: 'users.view' },
+  { label: 'Fees', icon: 'pi pi-wallet', to: '/fees', permission: 'fees.collect' },
+  { label: 'Payments', icon: 'pi pi-credit-card', to: '/payments' },
+  { label: 'Reports', icon: 'pi pi-file-excel', to: '/reports' },
+  { label: 'Settings', icon: 'pi pi-cog', to: '/settings', permission: 'settings.view' },
 ]
 
 const teacherNavItems: NavMenuItem[] = [
-  { label: 'Faculty Dashboard', icon: 'pi pi-home', to: '/dashboard' },
+  { label: 'Dashboard', icon: 'pi pi-home', to: '/dashboard' },
   { label: 'My Students', icon: 'pi pi-users', to: '/students' },
-  { label: 'Attendance Roll-Call', icon: 'pi pi-check-circle', to: '/attendance' },
-  { label: 'Class Timetable', icon: 'pi pi-calendar', to: '/timetable' },
-  { label: 'Marks Entry & Results', icon: 'pi pi-file-edit', to: '/exams' },
-  { label: 'Communications & Notices', icon: 'pi pi-megaphone', to: '/communications' },
-  { label: 'Notification Center', icon: 'pi pi-bell', to: '/notifications' },
-  { label: 'Academic Curriculum', icon: 'pi pi-book', to: '/academics' },
+  { label: 'Attendance', icon: 'pi pi-check-circle', to: '/attendance' },
+  { label: 'Timetable', icon: 'pi pi-calendar', to: '/timetable' },
+  { label: 'Exams & Marks', icon: 'pi pi-file-edit', to: '/exams' },
+  { label: 'Notices', icon: 'pi pi-megaphone', to: '/communications' },
+  { label: 'Academics', icon: 'pi pi-book', to: '/academics' },
 ]
 
+// Student & parent menus use their dedicated portal routes (student.routes.ts / parent.routes.ts).
 const studentNavItems: NavMenuItem[] = [
-  { label: 'Student Portal', icon: 'pi pi-home', to: '/student/dashboard' },
-  { label: 'Class Timetable', icon: 'pi pi-calendar', to: '/timetable' },
-  { label: 'My Attendance', icon: 'pi pi-check-circle', to: '/attendance' },
-  { label: 'Report Cards & Results', icon: 'pi pi-file-edit', to: '/exams' },
-  { label: 'Notice Board & Alerts', icon: 'pi pi-megaphone', to: '/communications' },
-  { label: 'Notifications', icon: 'pi pi-bell', to: '/notifications' },
+  { label: 'Dashboard', icon: 'pi pi-home', to: '/student/dashboard' },
+  { label: 'Timetable', icon: 'pi pi-calendar', to: '/student/timetable' },
+  { label: 'Attendance', icon: 'pi pi-check-circle', to: '/student/attendance' },
+  { label: 'Results', icon: 'pi pi-file-edit', to: '/student/examinations' },
+  { label: 'Notices', icon: 'pi pi-megaphone', to: '/student/notices' },
 ]
 
 const parentNavItems: NavMenuItem[] = [
-  { label: 'Guardian Portal', icon: 'pi pi-home', to: '/parent/dashboard' },
-  { label: 'Child Attendance', icon: 'pi pi-check-circle', to: '/attendance' },
-  { label: 'Class Timetable', icon: 'pi pi-calendar', to: '/timetable' },
-  { label: 'Child Report Cards', icon: 'pi pi-file-edit', to: '/exams' },
-  { label: 'Notice Board & Alerts', icon: 'pi pi-megaphone', to: '/communications' },
-  { label: 'Notifications', icon: 'pi pi-bell', to: '/notifications' },
+  { label: 'Dashboard', icon: 'pi pi-home', to: '/parent/dashboard' },
+  { label: 'Attendance', icon: 'pi pi-check-circle', to: '/parent/attendance' },
+  // No /parent/timetable route exists; the shared timetable page serves guardians (timetable.view).
+  { label: 'Timetable', icon: 'pi pi-calendar', to: '/timetable' },
+  { label: 'Results', icon: 'pi pi-file-edit', to: '/parent/examinations' },
+  { label: 'Notices', icon: 'pi pi-megaphone', to: '/parent/notices' },
 ]
 
 const activeNavItems = computed<NavMenuItem[]>(() => {
@@ -91,6 +85,9 @@ const activeNavItems = computed<NavMenuItem[]>(() => {
       break
   }
 
+  // Every persona can manage their own profile
+  items = [...items, { label: 'My Profile', icon: 'pi pi-user-edit', to: '/profile' }]
+
   // Filter items by permission if defined
   return items.filter((item) => {
     if (!item.permission) return true
@@ -102,27 +99,11 @@ function getPersonaFromUser(): 'admin' | 'teacher' | 'student' | 'parent' | 'sta
   return authStore.persona
 }
 
-async function fetchHealth() {
-  try {
-    healthLoading.value = true
-    const { data } = await api.get<SystemHealth>('/api/v1/health')
-    healthData.value = data
-  } catch {
-    healthData.value = null
-  } finally {
-    healthLoading.value = false
-  }
-}
-
 function handleLinkClick() {
   if (props.mobileOpen) {
     emit('close-mobile')
   }
 }
-
-onMounted(() => {
-  fetchHealth()
-})
 </script>
 
 <template>
@@ -157,8 +138,8 @@ onMounted(() => {
         <button
           type="button"
           class="collapse-btn desktop-only"
-          :title="collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'"
-          aria-label="Toggle Sidebar"
+          :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+          :aria-label="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
           @click="emit('toggle-collapse')"
         >
           <i :class="collapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'"></i>
@@ -178,7 +159,7 @@ onMounted(() => {
       <!-- Navigation Section -->
       <nav class="sidebar-nav" aria-label="Main Navigation">
         <div v-if="!collapsed" class="nav-section-title">
-          {{ persona ? `${persona.toUpperCase()} PORTAL` : 'PORTAL NAVIGATION' }}
+          Menu
         </div>
 
         <router-link
@@ -186,7 +167,9 @@ onMounted(() => {
           :key="item.to"
           :to="item.to || '/'"
           class="nav-link"
-          :class="{ active: route.path === item.to }"
+          :class="{ active: route.path === item.to || route.path.startsWith(`${item.to}/`) }"
+          :title="collapsed ? item.label : undefined"
+          :aria-label="collapsed ? item.label : undefined"
           @click="handleLinkClick"
         >
           <i v-if="item.icon" :class="item.icon" class="nav-icon" aria-hidden="true"></i>
@@ -194,40 +177,13 @@ onMounted(() => {
         </router-link>
       </nav>
 
-      <!-- System Health Diagnostics (Admin/Staff only) -->
-      <div v-if="!collapsed && (persona === 'admin' || !persona)" class="sidebar-footer">
-        <div class="health-card">
-          <div class="health-header">
-            <span class="live-indicator"></span>
-            <span class="health-title">System Status</span>
-            <button
-              type="button"
-              class="refresh-health-btn"
-              title="Refresh Health"
-              @click="fetchHealth"
-            >
-              <i class="pi pi-refresh" :class="{ 'pi-spin': healthLoading }"></i>
-            </button>
-          </div>
-          <div v-if="healthData" class="health-details">
-            <div class="health-row">
-              <span>MySQL 8:</span>
-              <span class="status-ok">{{ healthData.database }}</span>
-            </div>
-            <div class="health-row">
-              <span>Redis:</span>
-              <span class="status-ok">{{ healthData.cache_redis }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
     </aside>
   </div>
 </template>
 
 <style scoped>
 .app-sidebar {
-  width: 260px;
+  width: var(--sidebar-width);
   background: #064e3b;
   color: #ffffff;
   display: flex;
@@ -241,7 +197,7 @@ onMounted(() => {
 }
 
 .app-sidebar.is-collapsed {
-  width: 80px;
+  width: var(--sidebar-collapsed-width);
 }
 
 .sidebar-header {
@@ -321,10 +277,8 @@ onMounted(() => {
 }
 
 .nav-section-title {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  font-weight: 600;
   color: #6ee7b7;
   padding: 0 0.75rem;
   margin-bottom: 0.4rem;
@@ -360,60 +314,6 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.health-card {
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  padding: 0.75rem;
-}
-
-.health-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.health-title {
-  font-size: 0.725rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #a7f3d0;
-  flex: 1;
-}
-
-.refresh-health-btn {
-  background: transparent;
-  border: none;
-  color: #a7f3d0;
-  cursor: pointer;
-  font-size: 0.75rem;
-}
-
-.health-details {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-  color: #d1fae5;
-}
-
-.health-row {
-  display: flex;
-  justify-content: space-between;
-}
-
-.status-ok {
-  color: #34d399;
-  font-weight: 600;
-}
-
 .mobile-backdrop {
   display: none;
 }
@@ -433,7 +333,7 @@ onMounted(() => {
     left: 0;
     bottom: 0;
     transform: translateX(-100%);
-    width: 260px !important;
+    width: var(--sidebar-width) !important;
   }
 
   .app-sidebar.mobile-open {

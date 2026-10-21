@@ -1,20 +1,47 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { FormField } from '@/components/forms'
 import { AppAlert } from '@/components/notifications'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const toast = useToast()
+const authStore = useAuthStore()
 
 const mfaCode = ref('')
 const isBackupCode = ref(false)
 const backupCode = ref('')
 const loading = ref(false)
 const errorMessage = ref<string | null>(null)
+
+// Reaching this page without a pending password step means there is nothing to verify.
+onMounted(() => {
+  if (!authStore.pendingMfa) {
+    router.replace({ name: 'login' })
+  }
+})
+
+function portalFor(persona: string): string {
+  const redirect = route.query.redirect
+  const defaults: Record<string, string> = {
+    student: '/student/dashboard',
+    parent: '/parent/dashboard',
+    teacher: '/teacher/dashboard',
+  }
+  const fallback = defaults[persona] ?? '/dashboard'
+  // Only honour same-app paths inside the user's own portal area
+  if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') && !redirect.startsWith('/auth') && !redirect.startsWith('/login')) {
+    if (persona === 'student' && !redirect.startsWith('/student')) return fallback
+    if (persona === 'parent' && !redirect.startsWith('/parent')) return fallback
+    return redirect
+  }
+  return fallback
+}
 
 async function verifyMfa() {
   errorMessage.value = null
@@ -25,23 +52,36 @@ async function verifyMfa() {
       : 'Please enter the 6-digit authenticator code.'
     return
   }
+  if (!isBackupCode.value && !/^\d{6}$/.test(code)) {
+    errorMessage.value = 'The authenticator code is 6 digits.'
+    return
+  }
 
   loading.value = true
   try {
-    // Simulate / execute MFA validation against API
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await authStore.verifyMfa(code)
     toast.add({
       severity: 'success',
       summary: 'Identity Verified',
-      detail: 'Two-factor authentication successful.',
+      detail: `Welcome back, ${authStore.user?.name ?? ''}`.trim(),
       life: 3000,
     })
-    router.push('/dashboard')
+    router.push(portalFor(authStore.persona))
   } catch (err: any) {
-    errorMessage.value = err.response?.data?.message || 'Invalid verification code. Please try again.'
+    // An expired/burned challenge cannot be retried: send the user back to the password step.
+    if (!authStore.pendingMfa || err?.response?.status === 429) {
+      errorMessage.value = err?.response?.data?.message || err?.message || 'Too many attempts. Please sign in again.'
+      return
+    }
+    errorMessage.value = err?.response?.data?.message || err?.message || 'Invalid verification code. Please try again.'
   } finally {
     loading.value = false
   }
+}
+
+function backToLogin() {
+  authStore.cancelMfa()
+  router.push({ name: 'login' })
 }
 </script>
 
@@ -122,10 +162,10 @@ async function verifyMfa() {
       </div>
 
       <div class="back-link-row">
-        <router-link to="/login" class="back-link">
+        <a href="/login" class="back-link" @click.prevent="backToLogin">
           <i class="pi pi-arrow-left"></i>
           <span>Back to sign in</span>
-        </router-link>
+        </a>
       </div>
     </form>
   </div>

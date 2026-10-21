@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
-import type { AdmissionApplication, TeacherAssignment, StudentEnrollment } from '../types'
+import type { AdmissionApplication, TeacherAssignment, StudentEnrollment, StaffProfile } from '../types'
 
 describe('Academic Foundation & People Management Frontend Contracts', () => {
   beforeEach(() => {
@@ -120,7 +120,7 @@ describe('Academic Foundation & People Management Frontend Contracts', () => {
         phone: '+8801700000000',
         user_type: 'staff',
         is_active: true,
-      },
+      } as StaffProfile['user'],
     }
 
     // Editable fields can update

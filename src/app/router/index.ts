@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { authGuard, roleGuard, permissionGuard } from '@/app/guards'
+import { useAuthStore } from '@/stores/auth'
 import { authRoutes } from './auth.routes'
 import { adminRoutes } from './admin.routes'
 import { teacherRoutes } from './teacher.routes'
@@ -110,25 +111,32 @@ const routes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/SettingsView.vue'),
-        meta: { title: 'System Settings — Evergreen Academy', permission: 'settings.view' },
+        meta: { title: 'Settings — Evergreen Academy', permission: 'settings.view' },
       },
       {
         path: 'communications',
         name: 'communications',
         component: () => import('@/modules/notices/NoticesView.vue'),
-        meta: { title: 'Communications & Notices — Evergreen Academy' },
+        meta: { title: 'Notices — Evergreen Academy' },
       },
       {
         path: 'notifications',
         name: 'notifications',
-        component: () => import('@/modules/notifications/NotificationsView.vue'),
-        meta: { title: 'Notification Center — Evergreen Academy' },
+        // Personal notifications live in the communications inbox (single destination).
+        redirect: { name: 'communications', query: { tab: 'inbox' } },
+      },
+      {
+        // Self-service profile settings for every role (no role/permission restriction)
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/modules/profile/ProfileView.vue'),
+        meta: { title: 'My Profile — Evergreen Academy' },
       },
       {
         path: 'reports',
         name: 'reports',
         component: () => import('@/modules/reports/ReportsView.vue'),
-        meta: { title: 'Reports & Exports — Evergreen Academy' },
+        meta: { title: 'Reports — Evergreen Academy' },
       },
     ],
   },
@@ -153,6 +161,17 @@ router.beforeEach(async (to) => {
 })
 
 router.beforeEach(authGuard)
+
+// Accounts whose password was set by the school must choose their own before anything else
+// (the API enforces the same rule and answers 403 PASSWORD_CHANGE_REQUIRED elsewhere).
+router.beforeEach((to) => {
+  const authStore = useAuthStore()
+  if (authStore.isAuthenticated && authStore.user?.must_change_password && to.name !== 'profile' && !to.meta.guestOnly) {
+    return { name: 'profile', query: { required: 'password' } }
+  }
+  return true
+})
+
 router.beforeEach(roleGuard)
 router.beforeEach(permissionGuard)
 

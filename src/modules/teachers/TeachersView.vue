@@ -4,8 +4,14 @@ import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import { useConfirmModal } from '@/composables/useConfirmModal'
 import PageHeader from '@/components/common/PageHeader.vue'
+import { formatBDT } from '@/utils/formatters'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
+import IssuedCredentialsDialog from '@/components/common/IssuedCredentialsDialog.vue'
+
+// One-time display of a new staff member's login details
+const credentialsVisible = ref(false)
+const issuedCredentials = ref<{ name?: string; email?: string; password?: string }>({})
 import DataTableWrapper from '@/components/common/DataTableWrapper.vue'
 import type { StaffProfile, Teacher, TeacherAssignment, StaffAttendanceItem, StaffAttendanceSummary, StaffAttendanceLockInfo } from '@/types'
 import { useAuthStore } from '@/stores/auth'
@@ -313,6 +319,15 @@ async function handleCreateStaff() {
     const { data } = await api.post('/api/v1/staff', payload)
     notifySuccess('Staff Created', data.message || 'Staff profile provisioned successfully.')
     staffDialogVisible.value = false
+    const creds = data?.data?.credentials
+    if (creds?.temporary_password) {
+      issuedCredentials.value = {
+        name: data.data.user?.name,
+        email: creds.email,
+        password: creds.temporary_password,
+      }
+      credentialsVisible.value = true
+    }
     await fetchStaff()
     await fetchTeachers()
   } catch (err: any) {
@@ -815,36 +830,33 @@ onMounted(async () => {
 <template>
   <div class="staff-page">
     <PageHeader
-      title="Staff Records & Teacher Allocations"
-      subtitle="Employment directory, faculty specializations, subject allocations, and homeroom Class Teacher assignments"
-      showBreadcrumbs
+      title="Staff"
+      subtitle="Staff directory, teacher allocations and staff attendance."
     >
       <template #actions>
         <Button
           v-if="activeTab === 'staff'"
           label="Add Staff Member"
           icon="pi pi-user-plus"
-          class="brand-gradient-bg border-none"
           @click="openCreateStaffModal"
         />
         <Button
           v-else-if="activeTab === 'assignments'"
           label="New Teacher Allocation"
           icon="pi pi-briefcase"
-          class="brand-gradient-bg border-none"
           @click="openAssignTeacherModal"
         />
         <div v-else class="flex items-center gap-2">
           <Button
             label="Mark All Present"
             icon="pi pi-check"
-            class="p-button-outlined p-button-sm border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+            severity="success" outlined size="small"
             @click="markAllStaffPresent"
           />
           <Button
             label="Save Attendance"
             icon="pi pi-save"
-            class="brand-gradient-bg border-none p-button-sm font-medium"
+            size="small" class="font-medium"
             :loading="savingAttendance"
             @click="saveStaffAttendance"
           />
@@ -968,7 +980,7 @@ onMounted(async () => {
 
         <Column field="basic_salary" header="Basic Salary" style="width: 130px">
           <template #body="{ data }">
-            <span class="font-mono font-bold text-slate-700">৳ {{ Number(data.basic_salary).toLocaleString() }}</span>
+            <span class="font-mono font-bold text-slate-700">{{ formatBDT(data.basic_salary) }}</span>
           </template>
         </Column>
 
@@ -1242,7 +1254,7 @@ onMounted(async () => {
         <!-- Present Rate -->
         <div class="attendance-kpi-card border-l-4 border-l-emerald-500">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Attendance Rate</div>
+            <div class="text-xs font-medium text-slate-500">Attendance Rate</div>
             <div class="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
               {{ attendanceSummary.present_rate }}%
             </div>
@@ -1258,7 +1270,7 @@ onMounted(async () => {
         <!-- Present -->
         <div class="attendance-kpi-card border-l-4 border-l-emerald-600">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Present</div>
+            <div class="text-xs font-medium text-slate-500">Present</div>
             <div class="text-xl font-extrabold text-slate-800 dark:text-slate-100 mt-0.5">
               {{ attendanceSummary.present_count }}
             </div>
@@ -1272,7 +1284,7 @@ onMounted(async () => {
         <!-- Late Arrivals -->
         <div class="attendance-kpi-card border-l-4 border-l-amber-500">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Late Arrivals</div>
+            <div class="text-xs font-medium text-slate-500">Late Arrivals</div>
             <div class="text-xl font-extrabold text-amber-600 dark:text-amber-400 mt-0.5">
               {{ attendanceSummary.late_count }}
             </div>
@@ -1286,7 +1298,7 @@ onMounted(async () => {
         <!-- Half Day -->
         <div class="attendance-kpi-card border-l-4 border-l-sky-500">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Half Day</div>
+            <div class="text-xs font-medium text-slate-500">Half Day</div>
             <div class="text-xl font-extrabold text-sky-600 dark:text-sky-400 mt-0.5">
               {{ attendanceSummary.half_day_count }}
             </div>
@@ -1300,7 +1312,7 @@ onMounted(async () => {
         <!-- On Leave -->
         <div class="attendance-kpi-card border-l-4 border-l-purple-500">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">On Leave</div>
+            <div class="text-xs font-medium text-slate-500">On Leave</div>
             <div class="text-xl font-extrabold text-purple-600 dark:text-purple-400 mt-0.5">
               {{ attendanceSummary.on_leave_count }}
             </div>
@@ -1314,7 +1326,7 @@ onMounted(async () => {
         <!-- Absent -->
         <div class="attendance-kpi-card border-l-4 border-l-rose-500">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Absent</div>
+            <div class="text-xs font-medium text-slate-500">Absent</div>
             <div class="text-xl font-extrabold text-rose-600 dark:text-rose-400 mt-0.5">
               {{ attendanceSummary.absent_count }}
             </div>
@@ -1383,7 +1395,7 @@ onMounted(async () => {
               icon="pi pi-lock-open"
               severity="danger"
               outlined
-              class="p-button-sm text-xs py-1 font-semibold"
+              size="small" class="text-xs py-1 font-semibold"
               :loading="lockingAttendance"
               @click="promptToggleLock('unlock')"
             />
@@ -1393,21 +1405,21 @@ onMounted(async () => {
               icon="pi pi-lock"
               severity="secondary"
               outlined
-              class="p-button-sm text-xs py-1 font-semibold"
+              size="small" class="text-xs py-1 font-semibold"
               :loading="lockingAttendance"
               @click="promptToggleLock('lock')"
             />
             <Button
               label="Mark All Present"
               icon="pi pi-check-circle"
-              class="p-button-outlined p-button-sm border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-xs py-1"
+              severity="success" outlined size="small"
               :disabled="attendanceLock.is_locked"
               @click="markAllStaffPresent"
             />
             <Button
               label="Save Attendance"
               icon="pi pi-save"
-              class="brand-gradient-bg border-none p-button-sm text-xs py-1 font-semibold"
+              size="small" class="text-xs py-1 font-semibold"
               :disabled="attendanceLock.is_locked"
               :loading="savingAttendance"
               @click="saveStaffAttendance"
@@ -1429,7 +1441,7 @@ onMounted(async () => {
         <div v-else class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
-              <tr class="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 bg-slate-50/50 dark:bg-slate-800/40">
+              <tr class="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 bg-slate-50/50 dark:bg-slate-800/40">
                 <th class="py-3 px-4">Staff Member</th>
                 <th class="py-3 px-3">Department & Designation</th>
                 <th class="py-3 px-3 text-center">Attendance Status</th>
@@ -1617,7 +1629,7 @@ onMounted(async () => {
         <div class="form-section-card">
           <div class="section-title-row">
             <span class="section-badge bg-emerald-100 text-emerald-800">1</span>
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Personal & Contact Details</span>
+            <span class="text-sm font-semibold text-slate-700">Personal & Contact Details</span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-2">
@@ -1687,7 +1699,7 @@ onMounted(async () => {
         <div class="form-section-card">
           <div class="section-title-row">
             <span class="section-badge bg-emerald-100 text-emerald-800">2</span>
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Designation & Department</span>
+            <span class="text-sm font-semibold text-slate-700">Designation & Department</span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-2">
@@ -1846,7 +1858,7 @@ onMounted(async () => {
         <div class="modal-footer flex items-center justify-between pt-3 mt-1 border-t border-slate-200">
           <span class="text-xs text-slate-500 flex items-center gap-1.5">
             <i class="pi pi-lock text-slate-400"></i>
-            Initial login password: <code class="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded font-semibold border border-slate-200">Evergreen123!@#</code>
+            A unique temporary password is generated and shown once after saving; it must be changed at first sign-in.
           </span>
           <div class="flex items-center gap-2">
             <Button label="Cancel" severity="secondary" text @click="staffDialogVisible = false" />
@@ -1855,7 +1867,7 @@ onMounted(async () => {
               label="Provision Staff Member"
               icon="pi pi-check"
               :loading="savingStaff"
-              class="brand-gradient-bg border-none font-semibold px-4"
+              class="font-semibold px-4"
             />
           </div>
         </div>
@@ -1895,7 +1907,7 @@ onMounted(async () => {
         <div class="form-section-card">
           <div class="section-title-row">
             <span class="section-badge bg-emerald-100 text-emerald-800">1</span>
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Personal & Contact Details</span>
+            <span class="text-sm font-semibold text-slate-700">Personal & Contact Details</span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-2">
@@ -1965,7 +1977,7 @@ onMounted(async () => {
         <div class="form-section-card">
           <div class="section-title-row">
             <span class="section-badge bg-emerald-100 text-emerald-800">2</span>
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Designation, Department & Status</span>
+            <span class="text-sm font-semibold text-slate-700">Designation, Department & Status</span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-2">
@@ -2132,7 +2144,7 @@ onMounted(async () => {
             label="Save Changes"
             icon="pi pi-check"
             :loading="savingEditStaff"
-            class="brand-gradient-bg border-none font-semibold px-5"
+            class="font-semibold px-5"
           />
         </div>
       </form>
@@ -2213,7 +2225,7 @@ onMounted(async () => {
             label="Apply Status"
             icon="pi pi-check"
             :loading="savingStatusChange"
-            class="brand-gradient-bg border-none font-semibold px-4"
+            class="font-semibold px-4"
           />
         </div>
       </form>
@@ -2264,7 +2276,7 @@ onMounted(async () => {
           <div class="section-title-row justify-between">
             <div class="flex items-center gap-2">
               <span class="section-badge bg-emerald-100 text-emerald-800">1</span>
-              <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Faculty Member Allocation</span>
+              <span class="text-sm font-semibold text-slate-700">Faculty Member Allocation</span>
             </div>
             <span
               v-if="selectedTeacher"
@@ -2333,7 +2345,7 @@ onMounted(async () => {
         <div class="form-section-card">
           <div class="section-title-row">
             <span class="section-badge bg-emerald-100 text-emerald-800">2</span>
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Classroom & Section Placement</span>
+            <span class="text-sm font-semibold text-slate-700">Classroom & Section Placement</span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-2.5">
@@ -2403,7 +2415,7 @@ onMounted(async () => {
         <div class="form-section-card">
           <div class="section-title-row">
             <span class="section-badge bg-emerald-100 text-emerald-800">3</span>
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Teaching Role & Subject Assignment</span>
+            <span class="text-sm font-semibold text-slate-700">Teaching Role & Subject Assignment</span>
           </div>
 
           <div class="mt-2.5 flex flex-col gap-3">
@@ -2502,7 +2514,7 @@ onMounted(async () => {
             :label="isEditingAssignment ? 'Update Allocation' : 'Save Allocation'"
             icon="pi pi-check"
             :loading="savingAssignment"
-            class="brand-gradient-bg border-none font-semibold px-4"
+            class="font-semibold px-4"
           />
         </div>
       </form>
@@ -2572,6 +2584,14 @@ onMounted(async () => {
         </div>
       </template>
     </Dialog>
+
+    <!-- New staff member's login details, shown once -->
+    <IssuedCredentialsDialog
+      v-model:visible="credentialsVisible"
+      :name="issuedCredentials.name"
+      :email="issuedCredentials.email"
+      :password="issuedCredentials.password"
+    />
   </div>
 </template>
 

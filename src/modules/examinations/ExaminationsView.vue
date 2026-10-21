@@ -4,6 +4,7 @@ import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/common/PageHeader.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
 import DataTableWrapper from '@/components/common/DataTableWrapper.vue'
 import Column from 'primevue/column'
@@ -20,7 +21,6 @@ import type {
   ResultPublicationVersion,
   ReportCardData,
   ClassLevel,
-  Section,
   AcademicYear,
   Subject
 } from '@/types'
@@ -40,28 +40,29 @@ const authStore = useAuthStore()
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
 
 // Role detection
-const isTeacher = computed(() => (authStore.persona === 'teacher' || authStore.hasExactRole('teacher')) && !authStore.isSuperAdmin && authStore.persona !== 'admin')
+// Mark entry is for subject teachers only (the server also checks the subject/section assignment);
+// exam controllers, principals and admins review instead of entering marks.
+const isTeacher = computed(() => authStore.hasExactRole('teacher'))
 const isStudentOrParent = computed(() => {
   if (authStore.isSuperAdmin || authStore.persona === 'admin' || authStore.hasExactRole('admin')) return false
   return authStore.persona === 'student' || authStore.persona === 'parent' || authStore.hasExactRole('student') || authStore.hasExactRole('parent')
 })
 const canManageExams = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('exam_controller') || authStore.hasPermission('exams.manage'))
 const canApproveOrPublish = computed(() => authStore.hasRole('super_admin') || authStore.hasRole('admin') || authStore.hasRole('exam_controller') || authStore.hasPermission('marks.publish'))
+// Mark sheets and report cards: teachers and the examination office (not accounts/library staff)
+const canViewMarks = computed(() => isTeacher.value || canApproveOrPublish.value || authStore.hasRole('principal'))
 
 // Tab state: 'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'
 const activeTab = ref<'exams' | 'entry' | 'controller' | 'publish' | 'reportCard'>(
   isStudentOrParent.value ? 'reportCard' : 'exams'
 )
 const loading = ref(false)
-const seedingDemo = ref(false)
-const autoFillingMarks = ref(false)
 const approvingAll = ref(false)
 
 // Metadata
 const examsList = ref<Exam[]>([])
 const academicYears = ref<AcademicYear[]>([])
 const classesList = ref<ClassLevel[]>([])
-const sectionsList = ref<Section[]>([])
 const subjectsList = ref<Subject[]>([])
 const gradingScales = ref<GradingScale[]>([])
 
@@ -116,7 +117,8 @@ const submissionsList = ref<ExamMarkSubmission[]>([])
 const submissionsLoading = ref(false)
 const reviewModalVisible = ref(false)
 const selectedSubmissionForReview = ref<ExamMarkSubmission | null>(null)
-const reviewDecision = ref<'APPROVE' | 'REJECT'>('APPROVE')
+// REOPEN: formal correction of already approved/published marks (exam office only, reason required)
+const reviewDecision = ref<'APPROVE' | 'REJECT' | 'REOPEN'>('APPROVE')
 const reviewRemarks = ref('')
 const reviewingSubmission = ref(false)
 
@@ -298,52 +300,12 @@ async function fetchInitialData() {
   }
 }
 
-// ⚡ AUTOMATION: 1-Click Complete Demo Lifecycle Seeder
-async function handleSeedDemo() {
-  seedingDemo.value = true
-  try {
-    const res = await api.post('/api/v1/exams/seed-demo')
-    notifySuccess(
-      'Exam Cycle Automated & Seeded',
-      'Mid-Term Examination 2026 configured: 7 NCTB subjects, 21 student evaluations, approved submissions, and published v1.0 merit rankings!'
-    )
-    await fetchInitialData()
-
-    const examData = res.data.data
-    if (examData?.exam?.id) {
-      entryExamId.value = examData.exam.id
-      controllerExamId.value = examData.exam.id
-      pubExamId.value = examData.exam.id
-      reportExamId.value = examData.exam.id
-
-      tabClassId.value = examData.class_id || 6
-      tabSectionId.value = examData.section_id || 1
-      reportClassId.value = examData.class_id || 6
-      reportSectionId.value = examData.section_id || 1
-      entryClassId.value = examData.class_id || 6
-      entrySectionId.value = examData.section_id || 1
-
-      // Auto set first subject paper
-      const updatedExam = examsList.value.find((e) => e.id === examData.exam.id)
-      if (updatedExam?.exam_subjects && updatedExam.exam_subjects.length > 0) {
-        entrySubjectId.value = updatedExam.exam_subjects[0].id
-      }
-
-      await fetchTabulation()
-      await fetchCandidatesForReport()
-
-      if (examData.top_student?.id) {
-        reportStudentId.value = examData.top_student.id
-        await fetchReportCard(examData.exam.id, examData.top_student.id)
-      }
-    }
-    // Switch to report card tab to showcase the result
-    activeTab.value = 'reportCard'
-  } catch (err: any) {
-    notifyError('Automation Failed', err.message || 'Failed to seed exam demo cycle.')
-  } finally {
-    seedingDemo.value = false
-  }
+// Exam lifecycle status -> badge colour
+function examStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'secondary' {
+  if (status === 'PUBLISHED') return 'success'
+  if (status === 'RESULT_APPROVED') return 'info'
+  if (status === 'MARKS_SUBMITTED') return 'warn'
+  return 'secondary'
 }
 
 // Watchers for Entry cascade
@@ -540,27 +502,6 @@ function recalculateRoster() {
   marksRoster.value.forEach(recalculateStudentRow)
 }
 
-// ⚡ Dynamic Helper: Auto-Fill Realistic Marks
-async function handleAutoFillMarks() {
-  if (!entryExamId.value || !entrySubjectId.value || !entrySectionId.value) {
-    notifyWarn('Selection Needed', 'Please select Examination, Class, Section, and Subject.')
-    return
-  }
-  autoFillingMarks.value = true
-  try {
-    const res = await api.post(`/api/v1/exams/${entryExamId.value}/marks/auto-fill`, {
-      exam_subject_id: entrySubjectId.value,
-      section_id: entrySectionId.value,
-    })
-    notifySuccess('Realistic Marks Generated', res.data.message || 'Auto-filled realistic CQ, MCQ, and Practical marks!')
-    await fetchMarksRoster()
-  } catch (err: any) {
-    notifyError('Auto-fill Failed', err.message || 'Failed to auto-fill marks.')
-  } finally {
-    autoFillingMarks.value = false
-  }
-}
-
 // Clear Marks
 function handleClearMarks() {
   marksRoster.value.forEach((r) => {
@@ -683,7 +624,7 @@ async function fetchSubmissions() {
   }
 }
 
-// ⚡ Batch Approver for Controller
+// Batch Approver for Controller
 async function handleApproveAllSubmissions() {
   if (!controllerExamId.value) return
   approvingAll.value = true
@@ -702,7 +643,7 @@ async function handleApproveAllSubmissions() {
   }
 }
 
-function openReviewModal(sub: ExamMarkSubmission, decision: 'APPROVE' | 'REJECT') {
+function openReviewModal(sub: ExamMarkSubmission, decision: 'APPROVE' | 'REJECT' | 'REOPEN') {
   selectedSubmissionForReview.value = sub
   reviewDecision.value = decision
   reviewRemarks.value = decision === 'APPROVE' ? 'Verified with grade thresholds.' : ''
@@ -711,18 +652,31 @@ function openReviewModal(sub: ExamMarkSubmission, decision: 'APPROVE' | 'REJECT'
 
 async function handleExecuteReview() {
   if (!selectedSubmissionForReview.value || !controllerExamId.value) return
+
+  if (reviewDecision.value === 'REOPEN' && reviewRemarks.value.trim().length < 10) {
+    notifyError('Reason required', 'Please explain why these marks need correcting (at least 10 characters).')
+    return
+  }
+
   reviewingSubmission.value = true
 
   try {
-    await api.post(`/api/v1/exams/${controllerExamId.value}/submissions/${selectedSubmissionForReview.value.id}/review`, {
-      decision: reviewDecision.value,
-      remarks: reviewRemarks.value,
-    })
+    const submissionUrl = `/api/v1/exams/${controllerExamId.value}/submissions/${selectedSubmissionForReview.value.id}`
+    if (reviewDecision.value === 'REOPEN') {
+      await api.post(`${submissionUrl}/reopen`, { reason: reviewRemarks.value.trim() })
+    } else {
+      await api.post(`${submissionUrl}/review`, {
+        decision: reviewDecision.value,
+        remarks: reviewRemarks.value,
+      })
+    }
     notifySuccess(
       'Reviewed',
       reviewDecision.value === 'APPROVE'
         ? 'Marks approved successfully.'
-        : 'Marks returned to teacher for rectification.'
+        : reviewDecision.value === 'REOPEN'
+          ? 'Marks reopened and returned to the subject teacher. The published result stays visible until the correction is approved and republished.'
+          : 'Marks returned to teacher for rectification.'
     )
     reviewModalVisible.value = false
     await fetchSubmissions()
@@ -905,31 +859,23 @@ function printReportCard() {
   <div class="exams-management-view">
     <PageHeader
       title="Examination & Result Publication"
-      subtitle="Complete lifecycle: Exam rules → Draft mark entry → Strict validation → Controller approval → Versioned publication → Real-time student alerts & Official Report Cards"
-      icon="pi pi-check-circle"
+      subtitle="Create exams, enter and approve marks, publish results"
     >
       <template #actions>
-        <!-- ⚡ 1-Click Automation Action -->
-        <Button
-          v-if="canManageExams"
-          label="⚡ Seed & Automate Live Exam Cycle"
-          icon="pi pi-bolt"
-          class="p-button-help p-button-sm automation-btn font-bold"
-          :loading="seedingDemo"
-          @click="handleSeedDemo"
-        />
         <Button
           v-if="canManageExams"
           label="New Examination"
           icon="pi pi-plus"
-          class="p-button-primary p-button-sm"
+          size="small"
           @click="openCreateExamModal"
         />
         <Button
           v-if="activeTab === 'reportCard' && reportCard"
           label="Print Official Transcript"
           icon="pi pi-print"
-          class="p-button-outlined p-button-sm print-hide"
+          size="small"
+          outlined
+          class="print-hide"
           @click="printReportCard"
         />
       </template>
@@ -948,8 +894,9 @@ function printReportCard() {
           <span class="step-title">Exams & Rules</span>
         </button>
 
+        <!-- Only subject teachers enter marks; admins / exam office review instead -->
         <button
-          v-if="!isStudentOrParent"
+          v-if="isTeacher"
           class="nav-step-btn"
           :class="{ active: activeTab === 'entry' }"
           @click="activeTab = 'entry'"
@@ -979,6 +926,7 @@ function printReportCard() {
         </button>
 
         <button
+          v-if="isStudentOrParent || canViewMarks"
           class="nav-step-btn"
           :class="{ active: activeTab === 'reportCard' }"
           @click="activeTab = 'reportCard'"
@@ -1008,7 +956,7 @@ function printReportCard() {
           <div class="metric-icon bg-emerald"><i class="pi pi-book" /></div>
           <div class="metric-info">
             <span class="metric-title">NCTB Subject Papers</span>
-            <h3 class="metric-num">{{ currentExamPapers.length || 7 }} Papers</h3>
+            <h3 class="metric-num">{{ currentExamPapers.length }} Papers</h3>
             <span class="metric-sub">CQ, MCQ & Practical breakdowns</span>
           </div>
         </div>
@@ -1017,17 +965,8 @@ function printReportCard() {
           <div class="metric-icon bg-indigo"><i class="pi pi-chart-bar" /></div>
           <div class="metric-info">
             <span class="metric-title">Grading Framework</span>
-            <h3 class="metric-num">GPA 5.00</h3>
-            <span class="metric-sub">{{ gradingScales.length }} Grade Bands (A+ to F)</span>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon bg-amber"><i class="pi pi-verified" /></div>
-          <div class="metric-info">
-            <span class="metric-title">Automation Engine</span>
-            <h3 class="metric-num">Live Ready</h3>
-            <span class="metric-sub">Auto-tabulation & publication</span>
+            <h3 class="metric-num">{{ gradingScales.length }} Grade Bands</h3>
+            <span class="metric-sub">Configured grading scale</span>
           </div>
         </div>
       </div>
@@ -1040,13 +979,6 @@ function printReportCard() {
               <h3>Institutional Examinations</h3>
               <span class="sub-text">Schedules, subject paper allocations and evaluation lifecycle</span>
             </div>
-            <Button
-              label="⚡ Seed Mid-Term 2026"
-              icon="pi pi-bolt"
-              class="p-button-sm p-button-outlined p-button-help"
-              :loading="seedingDemo"
-              @click="handleSeedDemo"
-            />
           </div>
 
           <DataTableWrapper
@@ -1077,18 +1009,7 @@ function printReportCard() {
 
             <Column field="status" header="Status">
               <template #body="{ data }">
-                <Tag
-                  :severity="
-                    data.status === 'PUBLISHED'
-                      ? 'success'
-                      : data.status === 'RESULT_APPROVED'
-                      ? 'primary'
-                      : data.status === 'MARKS_SUBMITTED'
-                      ? 'warn'
-                      : 'secondary'
-                  "
-                  :value="data.status"
-                />
+                <StatusBadge :status="data.status" :severity="examStatusSeverity(data.status)" />
               </template>
             </Column>
 
@@ -1098,7 +1019,8 @@ function printReportCard() {
                   v-if="canManageExams"
                   label="Configure Papers"
                   icon="pi pi-cog"
-                  class="p-button-outlined p-button-sm"
+                  size="small"
+                  outlined
                   @click="openConfigSubjects(data)"
                 />
               </template>
@@ -1243,26 +1165,17 @@ function printReportCard() {
           </div>
 
           <div class="action-buttons-group">
-            <!-- ⚡ Auto-Fill Button -->
-            <Button
-              label="⚡ Auto-Fill Realistic Marks"
-              icon="pi pi-bolt"
-              class="p-button-help p-button-sm"
-              :loading="autoFillingMarks"
-              :disabled="currentSubmission?.status === 'APPROVED' || currentSubmission?.status === 'PUBLISHED'"
-              @click="handleAutoFillMarks"
-            />
             <Button
               label="Clear Marks"
               icon="pi pi-refresh"
-              class="p-button-outlined p-button-secondary p-button-sm"
+              size="small" severity="secondary" outlined
               :disabled="currentSubmission?.status === 'APPROVED' || currentSubmission?.status === 'PUBLISHED'"
               @click="handleClearMarks"
             />
             <Button
               label="Save Draft"
               icon="pi pi-save"
-              class="p-button-secondary p-button-sm"
+              size="small" severity="secondary"
               :loading="savingDraft"
               :disabled="currentSubmission?.status === 'APPROVED' || currentSubmission?.status === 'PUBLISHED'"
               @click="handleSaveDraft"
@@ -1270,14 +1183,14 @@ function printReportCard() {
             <Button
               label="Run Validation"
               icon="pi pi-check"
-              class="p-button-outlined p-button-sm"
+              size="small" outlined
               :loading="validatingMarks"
               @click="handleRunValidation"
             />
             <Button
               label="Submit to Controller"
               icon="pi pi-send"
-              class="p-button-primary p-button-sm"
+              size="small"
               :loading="submittingMarks"
               :disabled="currentSubmission?.status === 'APPROVED' || currentSubmission?.status === 'PUBLISHED'"
               @click="handleSubmitMarks"
@@ -1425,11 +1338,11 @@ function printReportCard() {
               <h3>Subject Submissions Ledger</h3>
               <span class="sub-text">Section marks submitted by faculty awaiting official approval</span>
             </div>
-            <!-- ⚡ Approve All Button -->
+            <!-- Approve All Button -->
             <Button
-              label="⚡ Approve All Pending"
+              label="Approve All Pending"
               icon="pi pi-check-circle"
-              class="p-button-success p-button-sm"
+              size="small" severity="success"
               :loading="approvingAll"
               :disabled="!submissionsList.some((s) => s.status === 'SUBMITTED')"
               @click="handleApproveAllSubmissions"
@@ -1463,18 +1376,8 @@ function printReportCard() {
 
             <Column field="status" header="Status">
               <template #body="{ data }">
-                <Tag
-                  :severity="
-                    data.status === 'APPROVED'
-                      ? 'success'
-                      : data.status === 'REJECTED'
-                      ? 'danger'
-                      : data.status === 'SUBMITTED'
-                      ? 'warn'
-                      : 'secondary'
-                  "
-                  :value="data.status"
-                />
+                <StatusBadge :status="data.status" :severity="data.status === 'SUBMITTED' ? 'warn' : undefined" />
+
               </template>
             </Column>
 
@@ -1484,16 +1387,23 @@ function printReportCard() {
                   <Button
                     v-if="data.status === 'SUBMITTED'"
                     icon="pi pi-check"
-                    class="p-button-success p-button-sm p-button-rounded"
+                    size="small" severity="success" rounded
                     v-tooltip="'Approve'"
                     @click="openReviewModal(data, 'APPROVE')"
                   />
                   <Button
                     v-if="data.status === 'SUBMITTED'"
                     icon="pi pi-times"
-                    class="p-button-danger p-button-sm p-button-rounded"
+                    size="small" severity="danger" rounded
                     v-tooltip="'Request Revision'"
                     @click="openReviewModal(data, 'REJECT')"
+                  />
+                  <Button
+                    v-if="data.status === 'APPROVED' || data.status === 'PUBLISHED'"
+                    icon="pi pi-replay"
+                    size="small" severity="warn" rounded
+                    v-tooltip="'Reopen for correction (teacher edits, then re-approve)'"
+                    @click="openReviewModal(data, 'REOPEN')"
                   />
                 </div>
               </template>
@@ -1543,7 +1453,7 @@ function printReportCard() {
               <strong class="text-primary">{{ tabulationSummary.avgGpa }}</strong>
             </div>
             <div v-if="tabulationSummary.topScorer" class="tab-stat-item highlight">
-              <span class="label">🏆 Rank #1:</span>
+              <span class="label">Top scorer:</span>
               <strong>{{ tabulationSummary.topScorer.name }} (GPA {{ Number(tabulationSummary.topScorer.gpa).toFixed(2) }})</strong>
             </div>
           </div>
@@ -1572,7 +1482,8 @@ function printReportCard() {
                   </td>
                   <td v-for="s in tabulationData.subjects" :key="s.id" class="text-center">
                     <span v-if="st.subject_scores[s.id]" class="subject-cell-score">
-                      {{ st.subject_scores[s.id].total }}
+                      {{ st.subject_scores[s.id].is_absent && !st.subject_scores[s.id].is_missing ? 'ABS' : st.subject_scores[s.id].total }}
+
                       <small :class="st.subject_scores[s.id].grade === 'F' ? 'text-danger' : 'text-success'">
                         ({{ st.subject_scores[s.id].grade }})
                       </small>
@@ -1581,7 +1492,7 @@ function printReportCard() {
                   </td>
                   <td class="font-bold text-center">{{ st.total_marks }}</td>
                   <td class="text-center">
-                    <strong :class="st.gpa >= 5 ? 'text-success' : st.gpa < 2 ? 'text-danger' : ''">
+                    <strong :class="st.final_grade === 'F' || Number(st.gpa) === 0 ? 'text-danger' : Number(st.gpa) >= 5 ? 'text-success' : ''">
                       {{ Number(st.gpa).toFixed(2) }}
                     </strong>
                   </td>
@@ -1592,7 +1503,7 @@ function printReportCard() {
                   <td class="text-center">
                     <Button
                       icon="pi pi-file"
-                      class="p-button-outlined p-button-sm p-button-rounded"
+                      size="small" outlined rounded
                       v-tooltip="'View Official Report Card'"
                       @click="viewStudentFromTabulation(st.student_id)"
                     />
@@ -1643,7 +1554,7 @@ function printReportCard() {
             <Button
               label="Publish Results as New Official Version"
               icon="pi pi-send"
-              class="p-button-primary p-button-lg mt-3"
+              size="large" class="mt-3"
               :disabled="!pubExamId || !pubClassId"
               @click="publishModalVisible = true"
             />
@@ -1676,10 +1587,8 @@ function printReportCard() {
               <Column field="published_at" header="Published Date" />
               <Column field="status" header="Status">
                 <template #body="{ data }">
-                  <Tag
-                    :severity="data.status === 'PUBLISHED' ? 'success' : 'secondary'"
-                    :value="data.status"
-                  />
+                  <StatusBadge :status="data.status" />
+
                 </template>
               </Column>
             </DataTableWrapper>
@@ -1731,7 +1640,7 @@ function printReportCard() {
             <Button
               label="Previous Candidate"
               icon="pi pi-chevron-left"
-              class="p-button-outlined p-button-sm"
+              size="small" outlined
               :disabled="!canPrevCandidate"
               @click="prevCandidate"
             />
@@ -1739,13 +1648,13 @@ function printReportCard() {
               label="Next Candidate"
               icon="pi pi-chevron-right"
               iconPos="right"
-              class="p-button-outlined p-button-sm"
+              size="small" outlined
               :disabled="!canNextCandidate"
               @click="nextCandidate"
             />
             <Button
-              label="🏆 View Top Scorer (Rank #1)"
-              class="p-button-help p-button-sm font-bold"
+              label="View Top Scorer"
+              size="small" severity="help" class="font-bold"
               @click="viewTopScorer"
             />
           </div>
@@ -1754,7 +1663,7 @@ function printReportCard() {
             <Button
               label="Print Official Transcript"
               icon="pi pi-print"
-              class="p-button-primary p-button-sm"
+              size="small"
               :disabled="!reportCard"
               @click="printReportCard"
             />
@@ -1824,11 +1733,11 @@ function printReportCard() {
                 <tr v-for="sm in reportCard.subject_marks" :key="sm.exam_subject_id">
                   <td><strong>{{ sm.subject_name }}</strong></td>
                   <td>{{ sm.total_max }}</td>
-                  <td>{{ sm.creative_obtained }}</td>
-                  <td>{{ sm.mcq_obtained }}</td>
-                  <td>{{ sm.practical_obtained }}</td>
-                  <td>{{ sm.ca_obtained }}</td>
-                  <td><strong>{{ sm.total_obtained }}</strong></td>
+                  <td>{{ sm.is_absent ? 'ABS' : sm.creative_obtained }}</td>
+                  <td>{{ sm.is_absent ? 'ABS' : sm.mcq_obtained }}</td>
+                  <td>{{ sm.is_absent ? 'ABS' : sm.practical_obtained }}</td>
+                  <td>{{ sm.is_absent ? 'ABS' : sm.ca_obtained }}</td>
+                  <td><strong>{{ sm.is_absent ? 'ABS' : sm.total_obtained }}</strong></td>
                   <td>{{ sm.highest_in_class }}</td>
                   <td><strong :class="sm.letter_grade === 'F' ? 'text-danger' : 'text-success'">{{ sm.letter_grade }}</strong></td>
                   <td>{{ Number(sm.grade_point).toFixed(2) }}</td>
@@ -1899,7 +1808,7 @@ function printReportCard() {
     </div>
 
     <!-- MODAL: Create Exam -->
-    <Dialog v-model:visible="newExamDialogVisible" header="Create Examination Master" :modal="true" style="width: 500px">
+    <Dialog v-model:visible="newExamDialogVisible" header="Create Examination Master" :modal="true" :style="{ width: '500px', maxWidth: '95vw' }">
       <div class="form-vertical">
         <FormField label="Examination Title">
           <InputText v-model="newExamForm.name" placeholder="e.g. Annual Examination 2026" class="w-full" />
@@ -1912,13 +1821,13 @@ function printReportCard() {
         </FormField>
       </div>
       <template #footer>
-        <Button label="Cancel" class="p-button-text" @click="newExamDialogVisible = false" />
-        <Button label="Save Exam" class="p-button-primary" :loading="creatingExam" @click="handleCreateExam" />
+        <Button label="Cancel" text @click="newExamDialogVisible = false" />
+        <Button label="Save Exam" :loading="creatingExam" @click="handleCreateExam" />
       </template>
     </Dialog>
 
     <!-- MODAL: Configure Exam Subjects -->
-    <Dialog v-model:visible="configSubjectsDialogVisible" header="Configure Exam Subjects & Component Rules" :modal="true" style="width: 850px">
+    <Dialog v-model:visible="configSubjectsDialogVisible" header="Configure Exam Subjects & Component Rules" :modal="true" :style="{ width: '850px', maxWidth: '95vw' }">
       <div class="subjects-config-dialog">
         <table class="config-table">
           <thead>
@@ -1947,21 +1856,21 @@ function printReportCard() {
               <td><input type="number" v-model.number="row.total_max_marks" class="input-sm font-bold" /></td>
               <td><input type="number" v-model.number="row.pass_marks" class="input-sm" /></td>
               <td>
-                <Button icon="pi pi-trash" class="p-button-text p-button-danger p-button-sm" @click="removeSubjectConfigRow(idx)" />
+                <Button icon="pi pi-trash" text severity="danger" size="small" aria-label="Remove paper" @click="removeSubjectConfigRow(idx)" />
               </td>
             </tr>
           </tbody>
         </table>
-        <Button label="+ Add Paper" icon="pi pi-plus" class="p-button-outlined p-button-sm mt-2" @click="addSubjectConfigRow" />
+        <Button label="+ Add Paper" icon="pi pi-plus" size="small" outlined class="mt-2" @click="addSubjectConfigRow" />
       </div>
       <template #footer>
-        <Button label="Cancel" class="p-button-text" @click="configSubjectsDialogVisible = false" />
-        <Button label="Save Paper Rules" class="p-button-primary" :loading="savingSubjectsConfig" @click="handleSaveSubjectsConfig" />
+        <Button label="Cancel" text @click="configSubjectsDialogVisible = false" />
+        <Button label="Save Paper Rules" :loading="savingSubjectsConfig" @click="handleSaveSubjectsConfig" />
       </template>
     </Dialog>
 
     <!-- MODAL: Validation Results -->
-    <Dialog v-model:visible="validationModalVisible" header="Mark Entry Validation Report" :modal="true" style="width: 500px">
+    <Dialog v-model:visible="validationModalVisible" header="Mark Entry Validation Report" :modal="true" :style="{ width: '500px', maxWidth: '95vw' }">
       <div v-if="validationResult" class="validation-report">
         <div class="report-status" :class="validationResult.is_valid ? 'status-valid' : 'status-invalid'">
           <i class="pi" :class="validationResult.is_valid ? 'pi-check-circle' : 'pi-exclamation-triangle'" />
@@ -1984,28 +1893,42 @@ function printReportCard() {
         </div>
       </div>
       <template #footer>
-        <Button label="Close" class="p-button-primary" @click="validationModalVisible = false" />
+        <Button label="Close" @click="validationModalVisible = false" />
       </template>
     </Dialog>
 
     <!-- MODAL: Controller Review (Approve / Reject) -->
-    <Dialog v-model:visible="reviewModalVisible" :header="reviewDecision === 'APPROVE' ? 'Approve Subject Marks' : 'Request Revision'" :modal="true" style="width: 450px">
+    <Dialog
+      v-model:visible="reviewModalVisible"
+      :header="reviewDecision === 'APPROVE' ? 'Approve Subject Marks' : reviewDecision === 'REOPEN' ? 'Reopen Marks for Correction' : 'Request Revision'"
+      :modal="true"
+      :style="{ width: '450px', maxWidth: '95vw' }"
+    >
       <div class="form-vertical">
         <p v-if="reviewDecision === 'APPROVE'">
           Are you sure you want to approve this marks submission? Approved marks will be eligible for final tabulation and publication.
         </p>
+        <p v-else-if="reviewDecision === 'REOPEN'">
+          These marks will be returned to the subject teacher to correct. You cannot edit marks yourself.
+          The currently published result stays visible until the corrected marks are re-approved and republished as a new version.
+          The reason is recorded in the audit log.
+        </p>
         <p v-else>
           Please enter the reason or specific student roll numbers that require revision by the teacher:
         </p>
-        <FormField label="Notes / Remarks">
-          <InputText v-model="reviewRemarks" placeholder="Enter notes..." class="w-full" />
+        <FormField :label="reviewDecision === 'REOPEN' ? 'Reason for correction (required)' : 'Notes / Remarks'">
+          <InputText
+            v-model="reviewRemarks"
+            :placeholder="reviewDecision === 'REOPEN' ? 'e.g. Student appeal: question 4 re-marked' : 'Enter notes...'"
+            class="w-full"
+          />
         </FormField>
       </div>
       <template #footer>
-        <Button label="Cancel" class="p-button-text" @click="reviewModalVisible = false" />
+        <Button label="Cancel" text @click="reviewModalVisible = false" />
         <Button
-          :label="reviewDecision === 'APPROVE' ? 'Confirm Approval' : 'Submit Rejection'"
-          :class="reviewDecision === 'APPROVE' ? 'p-button-success' : 'p-button-danger'"
+          :label="reviewDecision === 'APPROVE' ? 'Confirm Approval' : reviewDecision === 'REOPEN' ? 'Reopen for Correction' : 'Submit Rejection'"
+          :severity="reviewDecision === 'APPROVE' ? 'success' : reviewDecision === 'REOPEN' ? 'warn' : 'danger'"
           :loading="reviewingSubmission"
           @click="handleExecuteReview"
         />
@@ -2013,7 +1936,7 @@ function printReportCard() {
     </Dialog>
 
     <!-- MODAL: Publish Results Confirmation -->
-    <Dialog v-model:visible="publishModalVisible" header="Official Result Publication" :modal="true" style="width: 500px">
+    <Dialog v-model:visible="publishModalVisible" header="Official Result Publication" :modal="true" :style="{ width: '500px', maxWidth: '95vw' }">
       <div class="form-vertical">
         <p>
           Publishing results will generate an official version snapshot, calculate final GPAs and student ranks, and immediately dispatch alerts to all enrolled students and guardians.
@@ -2023,8 +1946,8 @@ function printReportCard() {
         </FormField>
       </div>
       <template #footer>
-        <Button label="Cancel" class="p-button-text" @click="publishModalVisible = false" />
-        <Button label="Confirm & Publish" icon="pi pi-send" class="p-button-primary" :loading="publishingResults" @click="handlePublishResults" />
+        <Button label="Cancel" text @click="publishModalVisible = false" />
+        <Button label="Confirm & Publish" icon="pi pi-send" :loading="publishingResults" @click="handlePublishResults" />
       </template>
     </Dialog>
   </div>
@@ -2035,20 +1958,6 @@ function printReportCard() {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-}
-
-/* Automation Button Styling */
-.automation-btn {
-  background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%) !important;
-  border: none !important;
-  color: #ffffff !important;
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25) !important;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.automation-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.35) !important;
 }
 
 /* KPI Summary Cards */

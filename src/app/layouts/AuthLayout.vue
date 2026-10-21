@@ -28,25 +28,12 @@ const isWide = computed(() => {
         <div class="brand-details">
           <div class="brand-title-row">
             <span class="brand-title">Evergreen Academy</span>
-            <span class="brand-pill">SMS Enterprise</span>
           </div>
           <span class="brand-tagline">School Management System</span>
         </div>
       </div>
 
       <div class="header-actions">
-        <!-- Live System Operational Pill -->
-        <div class="status-pill" title="All Core & Billing Services Operational">
-          <span class="status-dot"></span>
-          <span class="status-text">Systems Operational</span>
-        </div>
-
-        <!-- Academic Session Indicator -->
-        <div class="session-badge d-none-sm">
-          <i class="pi pi-calendar-plus"></i>
-          <span>AY 2026–2027</span>
-        </div>
-
         <!-- Language Toggle -->
         <button
           type="button"
@@ -74,14 +61,6 @@ const isWide = computed(() => {
       <div class="footer-container">
         <div class="footer-copy">
           <span>&copy; {{ new Date().getFullYear() }} Evergreen Academy. All rights reserved.</span>
-          <span class="footer-separator">•</span>
-          <span class="footer-muted">Approved by Ministry of Education & NCTB Bangladesh</span>
-        </div>
-
-        <div class="security-badges">
-          <span class="sec-badge"><i class="pi pi-shield"></i> 256-Bit TLS 1.3</span>
-          <span class="sec-badge"><i class="pi pi-lock"></i> Sanctum Tokenized Session</span>
-          <span class="sec-badge"><i class="pi pi-verified"></i> NCTB Engine v2.4</span>
         </div>
       </div>
     </footer>

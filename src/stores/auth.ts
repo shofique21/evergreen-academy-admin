@@ -8,6 +8,30 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref<boolean>(false)
   const initialized = ref<boolean>(false)
 
+  // Pending two-factor challenge between the password step and the code step.
+  // Kept in sessionStorage (tab-scoped, cleared on close) so a page refresh does not lose it.
+  const MFA_STORAGE_KEY = 'auth_mfa_challenge'
+  const pendingMfa = ref<{ token: string; channel: string; email: string } | null>(readPendingMfa())
+
+  function readPendingMfa(): { token: string; channel: string; email: string } | null {
+    try {
+      const raw = sessionStorage.getItem(MFA_STORAGE_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  }
+
+  function setPendingMfa(value: { token: string; channel: string; email: string } | null): void {
+    pendingMfa.value = value
+    try {
+      if (value) sessionStorage.setItem(MFA_STORAGE_KEY, JSON.stringify(value))
+      else sessionStorage.removeItem(MFA_STORAGE_KEY)
+    } catch {
+      // storage unavailable (private mode): keep in memory only
+    }
+  }
+
   const isAuthenticated = computed(() => !!user.value)
   const isSuperAdmin = computed(() => {
     if (!user.value) return false
@@ -100,23 +124,74 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function login(payload: LoginPayload): Promise<void> {
+  function completeSignIn(data: AuthResponse): void {
+    user.value = data.user
+    if (data.token) {
+      localStorage.setItem('auth_token', data.token)
+    }
+    localStorage.removeItem('auth_logged_out')
+    setPendingMfa(null)
+  }
+
+  /**
+   * Password step. Resolves 'MFA_REQUIRED' when the account has two-factor enabled; the caller
+   * must then collect a code and call verifyMfa(). No user is signed in until that succeeds.
+   */
+  async function login(payload: LoginPayload): Promise<'OK' | 'MFA_REQUIRED'> {
     loading.value = true
     try {
       localStorage.removeItem('auth_logged_out')
       // Initialize CSRF cookie for Sanctum SPA session
       await getCsrfCookie()
 
-      const { data } = await api.post<AuthResponse>('/api/v1/auth/login', payload)
-      user.value = data.user
-      if (data.token) {
-        localStorage.setItem('auth_token', data.token)
+      const { data } = await api.post<AuthResponse & { requires_mfa?: boolean; mfa_token?: string; mfa_channel?: string }>(
+        '/api/v1/auth/login',
+        payload
+      )
+
+      if (data.requires_mfa && data.mfa_token) {
+        user.value = null
+        setPendingMfa({ token: data.mfa_token, channel: data.mfa_channel || 'TOTP', email: payload.email })
+        return 'MFA_REQUIRED'
       }
-      localStorage.removeItem('auth_logged_out')
+
+      completeSignIn(data)
+      return 'OK'
     } finally {
       loading.value = false
       initialized.value = true
     }
+  }
+
+  /**
+   * Code step: verify an authenticator or backup code against the pending challenge.
+   */
+  async function verifyMfa(code: string): Promise<void> {
+    if (!pendingMfa.value) {
+      throw new Error('Your sign-in session expired. Please enter your password again.')
+    }
+    loading.value = true
+    try {
+      const { data } = await api.post<AuthResponse>('/api/v1/auth/mfa/verify', {
+        mfa_token: pendingMfa.value.token,
+        code,
+      })
+      completeSignIn(data)
+    } finally {
+      loading.value = false
+      initialized.value = true
+    }
+  }
+
+  function cancelMfa(): void {
+    setPendingMfa(null)
+  }
+
+  /**
+   * Replace the cached user after a self-service profile change (name, phone, photo).
+   */
+  function setUser(updated: User): void {
+    user.value = updated
   }
 
   async function logout(): Promise<void> {
@@ -146,8 +221,12 @@ export const useAuthStore = defineStore('auth', () => {
     hasRole,
     hasExactRole,
     hasPermission,
+    pendingMfa,
     fetchUser,
+    setUser,
     login,
+    verifyMfa,
+    cancelMfa,
     logout,
   }
 })

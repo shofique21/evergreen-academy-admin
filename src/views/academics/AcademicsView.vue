@@ -1023,9 +1023,8 @@ onMounted(() => {
 <template>
   <div class="academics-page">
     <PageHeader
-      :title="isTeacher ? 'Academic Curriculum & Syllabus' : 'Academic Foundation & Institutional Framework'"
-      :subtitle="isTeacher ? 'Explore Bangladesh NCTB grade levels, sections, curricular subjects, credit hours, and pass marks' : 'Institutional calendar boundaries, Bangladesh NCTB class levels, sections, subjects, shifts, and facility rooms'"
-      showBreadcrumbs
+      title="Academics"
+      :subtitle="isTeacher ? 'Class levels, sections and subjects.' : 'Academic years, classes, sections, subjects, shifts and rooms.'"
     >
       <template #actions>
         <template v-if="canManageAcademics">
@@ -1033,35 +1032,30 @@ onMounted(() => {
             v-if="activeTab === 'class-levels'"
             label="Add Class Level"
             icon="pi pi-plus-circle"
-            class="brand-gradient-bg border-none"
             @click="openAddClassModal()"
           />
           <Button
             v-else-if="activeTab === 'classes'"
             label="Add Section"
             icon="pi pi-plus"
-            class="brand-gradient-bg border-none"
             @click="openAddSectionModal()"
           />
           <Button
             v-else-if="activeTab === 'subjects'"
             label="New Subject"
             icon="pi pi-book"
-            class="brand-gradient-bg border-none"
             @click="subjectDialogVisible = true"
           />
           <Button
             v-else-if="activeTab === 'rooms'"
             label="New Room"
             icon="pi pi-building"
-            class="brand-gradient-bg border-none"
             @click="openAddRoomModal()"
           />
           <Button
             v-else
             label="New Academic Session"
             icon="pi pi-calendar-plus"
-            class="brand-gradient-bg border-none"
             @click="sessionDialogVisible = true"
           />
         </template>
@@ -1242,7 +1236,6 @@ onMounted(() => {
             label="Add Class Level"
             icon="pi pi-plus"
             size="small"
-            class="brand-gradient-bg border-none"
             @click="openAddClassModal()"
           />
         </div>
@@ -1261,7 +1254,7 @@ onMounted(() => {
           <Button
             label="Quick Setup: Generate NCTB Classes (1–10)"
             icon="pi pi-bolt"
-            class="brand-gradient-bg border-none font-semibold px-4 py-2"
+            class="font-semibold px-4 py-2"
             :loading="batchClassSubmitting"
             @click="handleBatchGenerateNctb('ALL')"
           />
@@ -1433,7 +1426,6 @@ onMounted(() => {
             label="Add Section"
             icon="pi pi-plus"
             size="small"
-            class="brand-gradient-bg border-none"
             @click="openAddSectionModal()"
           />
         </div>
@@ -1556,7 +1548,6 @@ onMounted(() => {
             label="Add Subject"
             icon="pi pi-plus"
             size="small"
-            class="brand-gradient-bg border-none"
             @click="openAddSubjectModal()"
           />
         </div>
@@ -1659,7 +1650,6 @@ onMounted(() => {
             label="Register Room"
             icon="pi pi-plus"
             size="small"
-            class="brand-gradient-bg border-none"
             @click="openAddRoomModal()"
           />
         </div>
@@ -1864,7 +1854,7 @@ onMounted(() => {
             label="Establish Academic Session"
             icon="pi pi-check"
             :loading="sessionSubmitting"
-            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+            class="px-5 font-semibold"
           />
         </div>
       </form>
@@ -2160,7 +2150,7 @@ onMounted(() => {
             label="Register Term"
             icon="pi pi-check"
             :loading="termSubmitting"
-            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+            class="px-5 font-semibold"
           />
         </div>
       </form>
@@ -2291,7 +2281,7 @@ onMounted(() => {
               label="Update Academic Term"
               icon="pi pi-check"
               :loading="editTermSubmitting"
-              class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-5 font-semibold"
             />
           </div>
         </div>

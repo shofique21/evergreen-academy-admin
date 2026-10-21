@@ -58,8 +58,7 @@ export const studentRoutes: RouteRecordRaw[] = [
       {
         path: 'notifications',
         name: 'student-notifications',
-        component: () => import('@/modules/notifications/NotificationsView.vue'),
-        meta: { title: 'Student Alerts — Evergreen Academy' },
+        redirect: { name: 'student-notices', query: { tab: 'inbox' } },
       },
     ],
   },

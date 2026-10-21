@@ -5,8 +5,7 @@ import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate } from '@/utils/formatters'
-import { PageHeader, LoadingState, ErrorState } from '@/components/common'
-import { StatusBadge } from '@/components/notifications'
+import { PageHeader, LoadingState, ErrorState, StatusBadge } from '@/components/common'
 import { AppButton } from '@/components/forms'
 
 const router = useRouter()
@@ -66,7 +65,7 @@ interface AssignedSubject {
   is_class_teacher: boolean
   weekly_periods: number
   enrolled_students: number
-  attendance_average: number
+  attendance_average: number | null
 }
 
 interface PendingMarkExam {
@@ -148,309 +147,6 @@ const errorMessage = ref<string | null>(null)
 const dashboardData = ref<TeacherOverviewData | null>(null)
 const activeWorkTab = ref<'marks' | 'homework'>('marks')
 
-// Fallback initial dataset for offline/mock development
-const fallbackData: TeacherOverviewData = {
-  profile: {
-    teacher_id: 1,
-    name: 'Prof. Kamal Hossain',
-    email: 'kamal@evergreen.edu.bd',
-    employee_id: 'FAC-2026-0042',
-    designation: 'Senior Faculty Member',
-    department: 'Science & Mathematics',
-    specialization: 'Physics & Higher Mathematics',
-    summary_date: '2026-10-16',
-    day_of_week: 6,
-    day_name: 'Friday',
-  },
-  kpis: {
-    total_classes_today: 4,
-    completed_classes_today: 2,
-    pending_attendance_count: 1,
-    total_assigned_students: 185,
-    total_assigned_subjects: 4,
-    pending_marks_exams_count: 2,
-    active_homework_count: 3,
-  },
-  today_classes: [
-    {
-      id: 101,
-      period_id: 1,
-      period_number: 1,
-      period_name: 'Period 1 (08:30 - 09:15)',
-      start_time: '08:30:00',
-      end_time: '09:15:00',
-      time_formatted: '08:30 - 09:15',
-      subject_id: 1,
-      subject_name: 'Physics (Theory)',
-      subject_code: 'PHY-101',
-      class_name: 'Class 9',
-      section_id: 1,
-      section_name: 'Section A (Science)',
-      room_number: 'Room 301',
-      room_name: 'Main Academic Block',
-      is_completed: true,
-      is_live: false,
-      status: 'COMPLETED',
-      attendance_taken: true,
-      attendance_status: 'TAKEN',
-    },
-    {
-      id: 102,
-      period_id: 2,
-      period_number: 2,
-      period_name: 'Period 2 (09:15 - 10:00)',
-      start_time: '09:15:00',
-      end_time: '10:00:00',
-      time_formatted: '09:15 - 10:00',
-      subject_id: 2,
-      subject_name: 'Higher Mathematics',
-      subject_code: 'MATH-201',
-      class_name: 'Class 10',
-      section_id: 2,
-      section_name: 'Section B (Science)',
-      room_number: 'Room 304',
-      room_name: 'Science Wing',
-      is_completed: true,
-      is_live: false,
-      status: 'COMPLETED',
-      attendance_taken: false,
-      attendance_status: 'PENDING',
-    },
-    {
-      id: 103,
-      period_id: 3,
-      period_number: 3,
-      period_name: 'Period 3 (10:15 - 11:00)',
-      start_time: '10:15:00',
-      end_time: '11:00:00',
-      time_formatted: '10:15 - 11:00',
-      subject_id: 1,
-      subject_name: 'Physics Practical (Lab)',
-      subject_code: 'PHY-102L',
-      class_name: 'Class 9',
-      section_id: 1,
-      section_name: 'Section A (Science)',
-      room_number: 'Lab 2',
-      room_name: 'Physics Laboratory',
-      is_completed: false,
-      is_live: true,
-      status: 'LIVE_NOW',
-      attendance_taken: false,
-      attendance_status: 'NOT_STARTED',
-    },
-    {
-      id: 104,
-      period_id: 5,
-      period_number: 5,
-      period_name: 'Period 5 (12:00 - 12:45)',
-      start_time: '12:00:00',
-      end_time: '12:45:00',
-      time_formatted: '12:00 - 12:45',
-      subject_id: 3,
-      subject_name: 'General Science',
-      subject_code: 'GSCI-08',
-      class_name: 'Class 8',
-      section_id: 3,
-      section_name: 'Section A (Bangla Medium)',
-      room_number: 'Room 105',
-      room_name: 'Junior Block',
-      is_completed: false,
-      is_live: false,
-      status: 'UPCOMING',
-      attendance_taken: false,
-      attendance_status: 'NOT_STARTED',
-    },
-  ],
-  attendance_tasks: [
-    {
-      id: 'att-sample-1',
-      section_id: 2,
-      class_name: 'Class 10',
-      section_name: 'Section B (Science)',
-      subject_name: 'Higher Mathematics',
-      period_name: 'Period 2 (09:15 - 10:00)',
-      date: '2026-10-16',
-      date_formatted: 'Oct 16, 2026',
-      student_count: 44,
-      status: 'AWAITING_SUBMISSION',
-      urgency: 'HIGH',
-      action_url: '/teacher/attendance?section_id=2',
-    },
-  ],
-  assigned_subjects: [
-    {
-      id: 1,
-      subject_id: 101,
-      subject_name: 'Physics (Theory & Practical)',
-      subject_code: 'PHY-101',
-      class_id: 9,
-      class_name: 'Class 9 (Science)',
-      section_id: 1,
-      section_name: 'Section A',
-      is_class_teacher: true,
-      weekly_periods: 6,
-      enrolled_students: 48,
-      attendance_average: 97.2,
-    },
-    {
-      id: 2,
-      subject_id: 102,
-      subject_name: 'Higher Mathematics',
-      subject_code: 'HMATH-201',
-      class_id: 10,
-      class_name: 'Class 10 (Science)',
-      section_id: 2,
-      section_name: 'Section B',
-      is_class_teacher: false,
-      weekly_periods: 5,
-      enrolled_students: 45,
-      attendance_average: 95.8,
-    },
-    {
-      id: 3,
-      subject_id: 103,
-      subject_name: 'General Science',
-      subject_code: 'SCI-08',
-      class_id: 8,
-      class_name: 'Class 8 (Bangla Medium)',
-      section_id: 3,
-      section_name: 'Section A',
-      is_class_teacher: false,
-      weekly_periods: 4,
-      enrolled_students: 50,
-      attendance_average: 96.0,
-    },
-    {
-      id: 4,
-      subject_id: 104,
-      subject_name: 'Advanced Physics Seminar',
-      subject_code: 'PHY-103S',
-      class_id: 10,
-      class_name: 'Class 10 (Science)',
-      section_id: 4,
-      section_name: 'Section A',
-      is_class_teacher: false,
-      weekly_periods: 3,
-      enrolled_students: 42,
-      attendance_average: 98.1,
-    },
-  ],
-  pending_marks: [
-    {
-      id: 201,
-      exam_id: 12,
-      exam_name: 'Term 2 Final Examination 2026',
-      subject_id: 101,
-      subject_name: 'Physics (Creative & MCQ)',
-      class_name: 'Class 9 (Science Section A)',
-      deadline: '2026-11-10',
-      deadline_formatted: 'Nov 10, 2026',
-      total_students: 48,
-      entered_count: 32,
-      pending_count: 16,
-      completion_percentage: 66.7,
-      status: 'IN_PROGRESS',
-    },
-    {
-      id: 202,
-      exam_id: 13,
-      exam_name: 'Grade 10 Pre-Board Assessment',
-      subject_id: 102,
-      subject_name: 'Higher Mathematics',
-      class_name: 'Class 10 (Science Section B)',
-      deadline: '2026-10-31',
-      deadline_formatted: 'Oct 31, 2026',
-      total_students: 45,
-      entered_count: 0,
-      pending_count: 45,
-      completion_percentage: 0.0,
-      status: 'NOT_STARTED',
-    },
-  ],
-  homework: [
-    {
-      id: 301,
-      title: 'Newtonian Mechanics Problem Set (Ch. 4 Problems 1-15)',
-      subject_name: 'Physics',
-      class_name: 'Class 9',
-      section_name: 'Section A',
-      assigned_date: '2026-10-14',
-      due_date: '2026-10-18',
-      due_date_formatted: 'Oct 18, 2026 (In 2 days)',
-      submissions_count: 41,
-      total_students: 48,
-      pending_evaluations: 12,
-      status: 'ACTIVE',
-    },
-    {
-      id: 302,
-      title: 'Trigonometric Identities & Quadratic Systems Worksheet',
-      subject_name: 'Higher Mathematics',
-      class_name: 'Class 10',
-      section_name: 'Section B',
-      assigned_date: '2026-10-12',
-      due_date: '2026-10-16',
-      due_date_formatted: 'Due Today (11:59 PM)',
-      submissions_count: 38,
-      total_students: 45,
-      pending_evaluations: 24,
-      status: 'DUE_TODAY',
-    },
-    {
-      id: 303,
-      title: 'Chemical Bonds & Electrolysis Laboratory Prep Notes',
-      subject_name: 'General Science',
-      class_name: 'Class 8',
-      section_name: 'Section A',
-      assigned_date: '2026-10-15',
-      due_date: '2026-10-22',
-      due_date_formatted: 'Oct 22, 2026 (Next Week)',
-      submissions_count: 18,
-      total_students: 50,
-      pending_evaluations: 0,
-      status: 'ACTIVE',
-    },
-  ],
-  relevant_notices: [
-    {
-      id: 1,
-      title: 'Term 2 Final Examination Question Moderation & Seat Plan Guidelines',
-      category: 'ACADEMIC',
-      priority: 'HIGH',
-      is_pinned: true,
-      summary: 'All departmental head teachers must submit moderated creative and MCQ exam papers to the Exam Controller office by Oct 24.',
-      has_attachment: true,
-      attachment_url: '/documents/exam-moderation-guideline-2026.pdf',
-      published_at: '2026-10-16T14:00:00Z',
-      published_formatted: '4 hours ago',
-    },
-    {
-      id: 2,
-      title: 'Mandatory Biometric Attendance Logging & Morning Assembly Protocol',
-      category: 'ADMINISTRATIVE',
-      priority: 'NORMAL',
-      is_pinned: false,
-      summary: 'Faculty members are reminded to record fingerprint punch-in before 08:15 AM to ensure automated attendance synchronization.',
-      has_attachment: false,
-      attachment_url: null,
-      published_at: '2026-10-15T08:30:00Z',
-      published_formatted: 'Yesterday',
-    },
-    {
-      id: 3,
-      title: 'Inter-School Science Olympiad & Robotics Mentorship Registrations',
-      category: 'GENERAL',
-      priority: 'NORMAL',
-      is_pinned: false,
-      summary: 'Science teachers interested in mentoring student teams for the National Science Fair 2026 please coordinate with the Vice Principal.',
-      has_attachment: true,
-      attachment_url: '/documents/science-olympiad-form.pdf',
-      published_at: '2026-10-14T10:15:00Z',
-      published_formatted: '2 days ago',
-    },
-  ],
-}
-
 async function fetchTeacherDashboard(forceRefresh = false) {
   try {
     loading.value = true
@@ -461,24 +157,30 @@ async function fetchTeacherDashboard(forceRefresh = false) {
     if (data && data.data) {
       dashboardData.value = data.data
     } else {
-      dashboardData.value = fallbackData
+      dashboardData.value = null
+      errorMessage.value = 'The dashboard returned no data.'
     }
   } catch (err: any) {
-    dashboardData.value = fallbackData
+    // Show the real failure instead of silently rendering sample classes/marks as if they were real.
+    dashboardData.value = null
+    errorMessage.value = err?.response?.data?.message || 'Unable to load your dashboard right now. Please try again.'
   } finally {
     loading.value = false
   }
 }
 
-const current = computed<TeacherOverviewData>(() => dashboardData.value || fallbackData)
+// Only rendered once real data has loaded (template guards on dashboardData)
+const current = computed<TeacherOverviewData>(() => dashboardData.value as TeacherOverviewData)
 
 const welcomeTitle = computed(() => {
-  const teacherName = current.value.profile.name || authStore.user?.name || 'Faculty Member'
-  return `Welcome back, ${teacherName}`
+  const teacherName = dashboardData.value?.profile.name || authStore.user?.name || ''
+  return teacherName ? `Welcome back, ${teacherName}` : 'Dashboard'
 })
 
 const welcomeSubtitle = computed(() => {
-  return `${current.value.profile.designation} • ${current.value.profile.department} (${current.value.profile.day_name}, ${formatDate(current.value.profile.summary_date)})`
+  const profile = dashboardData.value?.profile
+  if (!profile) return ''
+  return [profile.designation, profile.department, `${profile.day_name}, ${formatDate(profile.summary_date)}`].filter(Boolean).join(' · ')
 })
 
 function markAttendance(task: AttendanceTask | TimetableSlot) {
@@ -516,12 +218,10 @@ onMounted(() => {
     <PageHeader
       :title="welcomeTitle"
       :subtitle="welcomeSubtitle"
-      icon="pi pi-briefcase"
     >
       <template #actions>
-        <span class="faculty-badge">
-          <span class="live-dot"></span>
-          <span>{{ current.profile.employee_id }} • ACTIVE FACULTY</span>
+        <span v-if="dashboardData?.profile.employee_id" class="faculty-badge">
+          {{ dashboardData.profile.employee_id }}
         </span>
 
         <AppButton
@@ -549,18 +249,18 @@ onMounted(() => {
     </PageHeader>
 
     <!-- Loading State -->
-    <LoadingState v-if="loading && !dashboardData" message="Synchronizing teaching routine and tasks..." />
+    <LoadingState v-if="loading && !dashboardData" message="Loading dashboard..." />
 
     <!-- Error State -->
     <ErrorState
       v-else-if="errorMessage"
-      title="Failed to Load Teacher Dashboard"
+      title="Unable to load dashboard"
       :message="errorMessage"
       @retry="fetchTeacherDashboard(true)"
     />
 
     <!-- Dashboard Content Grid -->
-    <div v-else class="dashboard-body">
+    <div v-else-if="dashboardData" class="dashboard-body">
       <!-- 1. KPI Metric Summary Cards -->
       <div class="kpi-banner-grid">
         <!-- Today's Classes -->
@@ -775,7 +475,7 @@ onMounted(() => {
                 </div>
                 <div class="stat-pill">
                   <span class="stat-label">Avg. Attendance</span>
-                  <span class="stat-val text-emerald-600 font-bold">{{ subj.attendance_average }}%</span>
+                  <span class="stat-val text-emerald-600 font-bold">{{ subj.attendance_average != null ? `${subj.attendance_average}%` : '—' }}</span>
                 </div>
               </div>
             </div>
@@ -965,18 +665,9 @@ onMounted(() => {
   border: 1px solid #cbd5e1;
   color: #334155;
   font-size: 0.775rem;
-  font-weight: 700;
+  font-weight: 600;
   padding: 0.4rem 0.85rem;
   border-radius: 9999px;
-  letter-spacing: 0.04em;
-}
-
-.live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: #10b981;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
 }
 
 .dashboard-body {

@@ -3,13 +3,16 @@ import { ref, onMounted, computed } from 'vue'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 import PageHeader from '@/components/common/PageHeader.vue'
+import { formatBDT } from '@/utils/formatters'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FormField from '@/components/common/FormField.vue'
 import DataTableWrapper from '@/components/common/DataTableWrapper.vue'
+import IssuedCredentialsDialog from '@/components/common/IssuedCredentialsDialog.vue'
+import FeeWaiverEditor, { type AdmissionWaiver } from '@/components/finance/FeeWaiverEditor.vue'
+import { firstApiError } from '@/utils/apiErrors'
 import type { AdmissionApplication } from '@/types'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
 
 const { notifySuccess, notifyError, notifyWarn } = useNotification()
@@ -103,6 +106,7 @@ const enrollForm = ref({
   section_id: '' as any,
   roll_number: '' as any,
   opening_balance_arrears: 0,
+  waivers: [] as AdmissionWaiver[],
 })
 
 const sectionRollInfo = ref<{
@@ -196,6 +200,7 @@ async function fetchApplications(query?: string) {
 }
 
 async function handleSubmitApplication() {
+  if (submitting.value) return
   if (
     !appForm.value.class_id ||
     !appForm.value.first_name?.trim() ||
@@ -218,18 +223,54 @@ async function handleSubmitApplication() {
     resetAppForm()
     await fetchApplications()
   } catch (err: unknown) {
-    const errObj = err as { message?: string }
-    notifyError('Submission Failed', errObj.message || 'Could not submit application.')
+    notifyError('Submission Failed', firstApiError(err, 'Could not submit application.'))
   } finally {
     submitting.value = false
   }
 }
 
+// Must match ReviewApplicationAction::TRANSITIONS on the server.
+const REVIEW_TRANSITIONS: Record<string, Array<{ value: string; label: string }>> = {
+  PENDING: [
+    { value: 'UNDER_REVIEW', label: 'Start review / verification' },
+    { value: 'REJECTED', label: 'Reject application' },
+  ],
+  UNDER_REVIEW: [
+    { value: 'APPROVED', label: 'Approve for admission' },
+    { value: 'REJECTED', label: 'Reject application' },
+  ],
+  APPROVED: [
+    { value: 'UNDER_REVIEW', label: 'Withdraw approval (back to review)' },
+    { value: 'REJECTED', label: 'Reject application' },
+  ],
+  REJECTED: [{ value: 'UNDER_REVIEW', label: 'Reconsider (back to review)' }],
+  ENROLLED: [],
+}
+
+const reviewOptions = computed(() => REVIEW_TRANSITIONS[selectedApp.value?.status ?? 'PENDING'] ?? [])
+
 function openReviewModal(app: AdmissionApplication) {
   selectedApp.value = app
-  reviewForm.value.status = app.status === 'PENDING' ? 'APPROVED' : app.status
+  const options = REVIEW_TRANSITIONS[app.status] ?? []
+  reviewForm.value.status = options[0]?.value ?? app.status
   reviewForm.value.review_notes = app.review_notes || ''
   reviewDialogVisible.value = true
+}
+
+// One-time display of a new student's login details
+const credentialsVisible = ref(false)
+const issuedCredentials = ref<{ name?: string; email?: string; password?: string; loginUrl?: string }>({})
+
+function showIssuedCredentials(result: any) {
+  const creds = result?.credentials
+  if (!creds?.temporary_password) return
+  issuedCredentials.value = {
+    name: result?.student?.full_name ?? result?.full_name ?? result?.user?.name,
+    email: creds.email,
+    password: creds.temporary_password,
+    loginUrl: creds.login_url,
+  }
+  credentialsVisible.value = true
 }
 
 async function handleReviewApplication() {
@@ -293,6 +334,7 @@ function openEnrollModal(app: AdmissionApplication) {
   enrollForm.value.section_id = initialSectionId
   enrollForm.value.roll_number = ''
   enrollForm.value.opening_balance_arrears = 0
+  enrollForm.value.waivers = []
   sectionRollInfo.value = null
   enrollDialogVisible.value = true
   if (initialSectionId) {
@@ -301,6 +343,7 @@ function openEnrollModal(app: AdmissionApplication) {
 }
 
 async function handleEnrollApplication() {
+  if (enrolling.value) return // ignore a double click while the first request runs
   if (!selectedApp.value || !enrollForm.value.section_id || !enrollForm.value.roll_number) {
     notifyWarn('Validation Required', 'Please select section and assign roll number.')
     return
@@ -318,20 +361,31 @@ async function handleEnrollApplication() {
     enrolling.value = true
     const { data } = await api.post(
       `/api/v1/admissions/applications/${selectedApp.value.id}/enroll`,
-      enrollForm.value
+      {
+        ...enrollForm.value,
+        // Send only completed scholarship rows
+        waivers: enrollForm.value.waivers
+          .filter((w) => w.fee_head_id && Number(w.discount_value) > 0)
+          .map((w) => ({ ...w, staff_user_id: w.waiver_category === 'STAFF_CHILD' ? w.staff_user_id || null : null })),
+      }
     )
     notifySuccess('Student Enrolled', data.message || 'Application enrolled into official student registry.')
+    const bill = data?.data?.invoice
+    if (bill) {
+      const discount = Number(bill.waiver_discount) || 0
+      notifySuccess(
+        'First bill created',
+        `${bill.invoice_number}: ${formatBDT(bill.total_payable)} due` +
+          (discount > 0 ? ` (after ${formatBDT(discount)} scholarship/waiver)` : '')
+      )
+    } else if (data?.data?.billing_warning) {
+      notifyWarn('No bill created', data.data.billing_warning)
+    }
     enrollDialogVisible.value = false
+    showIssuedCredentials(data?.data)
     await fetchApplications()
-  } catch (err: any) {
-    const errorMsg =
-      err.response?.data?.errors?.roll_number?.[0] ||
-      err.response?.data?.errors?.section_id?.[0] ||
-      err.response?.data?.errors?.application?.[0] ||
-      err.response?.data?.message ||
-      err.message ||
-      'Could not complete enrollment.'
-    notifyError('Enrollment Failed', errorMsg)
+  } catch (err: unknown) {
+    notifyError('Enrollment Failed', firstApiError(err, 'Could not complete enrollment.', ['roll_number', 'section_id', 'application']))
   } finally {
     enrolling.value = false
   }
@@ -421,7 +475,10 @@ async function handleUpdateApplication() {
 
   try {
     editSubmitting.value = true
-    const { data } = await api.put(`/api/v1/admissions/applications/${editingApp.value.id}`, editForm.value)
+    // Status/review notes only change through the Review step, never through Edit.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { status: _status, review_notes: _notes, ...payload } = editForm.value
+    const { data } = await api.put(`/api/v1/admissions/applications/${editingApp.value.id}`, payload)
     notifySuccess('Application Updated', data.message || 'Application record saved successfully.')
     editDialogVisible.value = false
     await fetchApplications()
@@ -445,15 +502,13 @@ onMounted(async () => {
 <template>
   <div class="admissions-page">
     <PageHeader
-      title="Admissions & Application Review"
-      subtitle="Application review pipeline, applicant background verification, entrance status, and official student enrollment"
-      showBreadcrumbs
+      title="Admissions"
+      subtitle="Review applications and enroll new students."
     >
       <template #actions>
         <Button
           label="Submit Application"
           icon="pi pi-file-edit"
-          class="brand-gradient-bg border-none"
           @click="submitDialogVisible = true"
         />
         <Button
@@ -575,11 +630,10 @@ onMounted(async () => {
                 label="Enroll"
                 icon="pi pi-user-plus"
                 size="small"
-                class="brand-gradient-bg border-none"
                 @click="openEnrollModal(data)"
               />
               <span v-else-if="data.status === 'ENROLLED'" class="font-mono text-xs text-emerald-700 font-bold px-2 py-1 bg-emerald-50 rounded border border-emerald-200">
-                {{ data.enrolledStudent?.student_uid || 'Enrolled' }}
+                {{ data.enrolled_student?.student_uid || 'Enrolled' }}
               </span>
             </div>
           </template>
@@ -966,7 +1020,7 @@ onMounted(async () => {
               label="Submit Application"
               icon="pi pi-check-circle"
               :loading="submitting"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
@@ -1017,31 +1071,20 @@ onMounted(async () => {
               </div>
             </FormField>
 
-            <FormField id="edit_app_status" label="Application Pipeline Status" required>
+            <!-- Status is read-only here: it changes only through the Review step (and Enroll) -->
+            <FormField id="edit_app_status" label="Application Pipeline Status" help-text="Use the Review button to change the status.">
               <div class="clean-field-wrap">
                 <i class="pi pi-flag field-icon text-amber-600"></i>
-                <select id="edit_app_status" v-model="editForm.status" class="clean-select" required>
-                  <option value="PENDING">Pending Review</option>
-                  <option value="UNDER_REVIEW">Under Review / Verification</option>
-                  <option value="APPROVED">Approved for Admission</option>
-                  <option value="REJECTED">Rejected</option>
-                  <option value="ENROLLED">Enrolled in SIS</option>
-                </select>
+                <input id="edit_app_status" :value="editForm.status" type="text" class="clean-input" disabled />
               </div>
             </FormField>
           </div>
 
-          <div class="mt-3">
-            <FormField id="edit_app_notes" label="Review / Assessment Notes">
+          <div v-if="editForm.review_notes" class="mt-3">
+            <FormField id="edit_app_notes" label="Review / Assessment Notes" help-text="Recorded by the reviewer.">
               <div class="clean-field-wrap">
                 <i class="pi pi-comment field-icon"></i>
-                <input
-                  id="edit_app_notes"
-                  v-model="editForm.review_notes"
-                  type="text"
-                  placeholder="Verification remarks, entrance exam score, interview observations..."
-                  class="clean-input"
-                />
+                <input id="edit_app_notes" :value="editForm.review_notes" type="text" class="clean-input" disabled />
               </div>
             </FormField>
           </div>
@@ -1344,7 +1387,7 @@ onMounted(async () => {
               label="Save Application Changes"
               icon="pi pi-check"
               :loading="editSubmitting"
-              class="brand-gradient-bg border-none px-6 font-semibold shadow-sm hover:shadow-md transition-all"
+              class="px-6 font-semibold"
             />
           </div>
         </div>
@@ -1352,11 +1395,11 @@ onMounted(async () => {
     </Dialog>
 
     <!-- Review Application Modal Dialog -->
-    <Dialog v-model:visible="reviewDialogVisible" modal header="Admission Application Review" :style="{ width: '500px' }">
+    <Dialog v-model:visible="reviewDialogVisible" modal header="Review Application" :style="{ width: '500px', maxWidth: '95vw' }">
       <div v-if="selectedApp" class="flex flex-col gap-3.5 pt-2">
         <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm flex flex-col gap-1.5 shadow-sm">
           <div class="flex justify-between items-center pb-1 border-b border-slate-200">
-            <span class="text-xs uppercase font-bold text-slate-500">Applicant</span>
+            <span class="text-xs font-semibold text-slate-500">Applicant</span>
             <span class="font-bold text-slate-800">{{ selectedApp.first_name }} {{ selectedApp.last_name }}</span>
           </div>
           <div class="flex justify-between items-center">
@@ -1372,10 +1415,9 @@ onMounted(async () => {
         <FormField id="review_decision" label="Admission Decision" required>
           <div class="clean-field-wrap">
             <i class="pi pi-check-square field-icon"></i>
+            <!-- Only the next steps allowed from the current status (review before approval) -->
             <select id="review_decision" v-model="reviewForm.status" class="clean-select">
-              <option value="UNDER_REVIEW">Under Review / Verification</option>
-              <option value="APPROVED">Approve for Admission</option>
-              <option value="REJECTED">Reject Application</option>
+              <option v-for="opt in reviewOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
             </select>
           </div>
         </FormField>
@@ -1392,7 +1434,7 @@ onMounted(async () => {
 
         <div class="flex justify-end gap-2.5 mt-2 pt-3 border-t border-slate-200">
           <Button label="Cancel" severity="secondary" outlined @click="reviewDialogVisible = false" />
-          <Button label="Save Decision" icon="pi pi-check" :loading="reviewing" class="brand-gradient-bg border-none px-5" @click="handleReviewApplication" />
+          <Button label="Save Decision" icon="pi pi-check" :loading="reviewing" class="px-5" @click="handleReviewApplication" />
         </div>
       </div>
     </Dialog>
@@ -1425,7 +1467,7 @@ onMounted(async () => {
           <div class="flex justify-between items-center pb-2 border-b border-emerald-200/60">
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span class="text-xs uppercase font-bold tracking-wider text-emerald-800">Enrolling Student</span>
+              <span class="text-xs font-semibold text-emerald-800">Enrolling Student</span>
             </div>
             <span class="font-bold text-slate-900 text-base">{{ selectedApp.first_name }} {{ selectedApp.last_name }}</span>
           </div>
@@ -1556,6 +1598,14 @@ onMounted(async () => {
           </div>
         </FormField>
 
+        <FormField id="enroll_waivers" label="Scholarship / Fee Waiver (optional)">
+          <FeeWaiverEditor
+            v-model="enrollForm.waivers"
+            :academic-year-id="selectedApp?.academic_year_id"
+            :class-id="selectedApp?.class_id"
+          />
+        </FormField>
+
         <div class="flex items-center justify-end gap-2.5 mt-2 pt-3 border-t border-slate-200">
           <Button label="Cancel" severity="secondary" outlined @click="enrollDialogVisible = false" />
           <Button
@@ -1563,7 +1613,7 @@ onMounted(async () => {
             icon="pi pi-user-plus"
             :loading="enrolling"
             :disabled="isRollTaken || !enrollForm.section_id || !enrollForm.roll_number"
-            class="brand-gradient-bg border-none px-5 font-semibold shadow-sm hover:shadow"
+            class="px-5 font-semibold"
             @click="handleEnrollApplication"
           />
         </div>
@@ -1791,11 +1841,11 @@ onMounted(async () => {
                 {{ selectedDetailApp.review_notes || 'No review remarks recorded yet.' }}
               </div>
             </div>
-            <div v-if="selectedDetailApp.enrolledStudent" class="data-item col-span-3 bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
+            <div v-if="selectedDetailApp.enrolled_student" class="data-item col-span-3 bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
               <span class="data-label text-emerald-800 font-bold">Enrolled SIS Student Record</span>
               <div class="flex items-center gap-4 mt-1">
-                <span class="text-xs">Student UID: <strong class="font-mono text-emerald-900">{{ selectedDetailApp.enrolledStudent.student_uid }}</strong></span>
-                <span class="text-xs">Roll Number: <strong class="font-mono text-emerald-900">{{ selectedDetailApp.enrolledStudent.roll_number || 'N/A' }}</strong></span>
+                <span class="text-xs">Student UID: <strong class="font-mono text-emerald-900">{{ selectedDetailApp.enrolled_student.student_uid }}</strong></span>
+                <span class="text-xs">Roll Number: <strong class="font-mono text-emerald-900">{{ selectedDetailApp.enrolled_student.current_enrollment?.roll_number || 'N/A' }}</strong></span>
               </div>
             </div>
           </div>
@@ -1837,7 +1887,7 @@ onMounted(async () => {
               v-if="selectedDetailApp.status === 'APPROVED'"
               label="Enroll Student"
               icon="pi pi-user-plus"
-              class="brand-gradient-bg border-none px-4"
+              class="px-4"
               @click="
                 detailsDialogVisible = false;
                 openEnrollModal(selectedDetailApp)
@@ -1847,6 +1897,15 @@ onMounted(async () => {
         </div>
       </template>
     </Dialog>
+
+    <!-- New student's login details, shown once to the office -->
+    <IssuedCredentialsDialog
+      v-model:visible="credentialsVisible"
+      :name="issuedCredentials.name"
+      :email="issuedCredentials.email"
+      :password="issuedCredentials.password"
+      :login-url="issuedCredentials.loginUrl"
+    />
   </div>
 </template>
 

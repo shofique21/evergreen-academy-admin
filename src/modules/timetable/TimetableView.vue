@@ -36,7 +36,6 @@ const canManageTimetable = computed(() => {
 // Views & Loading
 const activeTab = ref<'mixGrid' | 'sectionGrid' | 'teacherMatrix' | 'versions'>('mixGrid')
 const loading = ref(false)
-const reseedLoading = ref(false)
 
 // Metadata
 const classesList = ref<ClassLevel[]>([])
@@ -395,11 +394,11 @@ const teacherOptionsWithStatus = computed(() => {
       isBusy = true
       const sec = allSections.value.find((s) => s.id === busySlot.section_id)
       const secName = sec ? sec.displayName : (busySlot.section?.name || 'Class')
-      label = `⚠️ ${tName} — [BUSY: ${secName}]`
+      label = `${tName} (Busy: ${secName})`
     } else if (onLeave) {
-      label = `🚨 ${tName} — [ON LEAVE]`
+      label = `${tName} (On leave)`
     } else {
-      label = `✅ ${tName} (${t.specialization_subject || 'Faculty'})`
+      label = `${tName} (${t.specialization_subject || 'Available'})`
     }
 
     return {
@@ -434,7 +433,7 @@ const roomOptionsWithStatus = computed(() => {
     if (busySlot) {
       isBusy = true
       const sec = allSections.value.find((s) => s.id === busySlot.section_id)
-      label = `⚠️ ${r.room_number} — [Occupied: ${sec?.displayName || 'Class'}]`
+      label = `${r.room_number} (Occupied: ${sec?.displayName || 'Class'})`
     }
 
     return {
@@ -672,33 +671,6 @@ async function handleDeleteSlot(slotId: number) {
   }
 }
 
-async function handleSeedDemo() {
-  if (!canManageTimetable.value) {
-    notifyWarn('Access Restricted', 'You do not have permission to reset demo routines.')
-    return
-  }
-
-  if (
-    !confirm(
-      'Re-seed standard demo dataset? This will generate 70+ master routine slots across all grades, including active schedules, conflict validation cases, and marked teacher leave records.'
-    )
-  ) {
-    return
-  }
-
-  try {
-    reseedLoading.value = true
-    await api.post('/api/v1/timetable/seed-demo')
-    notifySuccess('Demo Data Ready', 'Master Routine demo dataset initialized successfully.')
-    await fetchMetadata()
-    await fetchAllVersionSlots()
-  } catch (err: any) {
-    notifyError('Reset Failed', err.response?.data?.message || err.message || 'Could not seed demo.')
-  } finally {
-    reseedLoading.value = false
-  }
-}
-
 async function fetchVersions() {
   try {
     const { data } = await api.get('/api/v1/timetable/versions', {
@@ -765,21 +737,10 @@ onMounted(async () => {
 <template>
   <div class="timetable-page">
     <PageHeader
-      title="Timetable & Routine Master Engine"
-      subtitle="Institutional period box schedule, teacher collision prevention guard, and teacher leave coverage"
-      showBreadcrumbs
+      title="Timetable"
+      subtitle="Class routines, teacher assignments and leave cover."
     >
       <template #actions>
-        <Button
-          v-if="canManageTimetable"
-          label="Reset Demo Routine"
-          icon="pi pi-bolt"
-          severity="help"
-          outlined
-          :loading="reseedLoading"
-          @click="handleSeedDemo"
-          title="Seed realistic cross-grade routine with on-leave teachers and collision tests"
-        />
         <Button
           v-if="canManageTimetable"
           label="New Version"
@@ -806,7 +767,7 @@ onMounted(async () => {
         <div>
           <div class="flex items-center gap-2 mb-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Routine Slots</span>
+            <span class="text-[11px] font-bold text-slate-500">Routine Slots</span>
           </div>
           <div class="text-3xl font-black text-slate-900 tracking-tight my-1">
             {{ totalSlotsCount }}
@@ -827,7 +788,7 @@ onMounted(async () => {
         <div>
           <div class="flex items-center gap-2 mb-1.5">
             <span class="w-2 h-2 rounded-full bg-sky-500"></span>
-            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Class Sections</span>
+            <span class="text-[11px] font-bold text-slate-500">Class Sections</span>
           </div>
           <div class="text-3xl font-black text-slate-900 tracking-tight my-1">
             {{ allSections.length }}
@@ -848,7 +809,7 @@ onMounted(async () => {
         <div>
           <div class="flex items-center gap-2 mb-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-600"></span>
-            <span class="text-[11px] font-black text-emerald-800 uppercase tracking-wider">Conflict Guard</span>
+            <span class="text-[11px] font-semibold text-emerald-800">Conflict Guard</span>
           </div>
           <div class="text-base font-extrabold text-emerald-950 mt-1 block tracking-tight">
             1 Teacher ≠ 2 Classes
@@ -874,13 +835,13 @@ onMounted(async () => {
         <div>
           <div class="flex items-center gap-2 mb-1.5">
             <span class="leave-pulse-dot"></span>
-            <span class="text-[11px] font-black text-red-700 uppercase tracking-wider">Teacher On Leave</span>
+            <span class="text-[11px] font-semibold text-red-700">Teacher On Leave</span>
           </div>
           <div class="text-3xl font-black text-red-950 tracking-tight my-1">
             {{ onLeaveSlotsCount }}
           </div>
           <div class="text-xs text-red-700 font-bold mt-1.5 flex items-center gap-1.5">
-            <span class="inline-block px-2 py-0.5 rounded-md text-[11px]" :class="filterOnlyLeave ? 'bg-red-600 text-white font-black' : 'bg-red-200/80 text-red-900'">
+            <span class="inline-block px-2 py-0.5 rounded-md text-[11px]" :class="filterOnlyLeave ? 'bg-red-600 text-white font-semibold' : 'bg-red-200/80 text-red-900'">
               {{ filterOnlyLeave ? 'Filtering active (click to clear)' : 'Red marked • Substitute needed' }}
             </span>
           </div>
@@ -982,7 +943,7 @@ onMounted(async () => {
           <div class="flex items-center gap-3 flex-wrap">
             <!-- Grade Dropdown -->
             <div class="inline-flex items-center gap-1.5">
-              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Grade:</span>
+              <span class="text-[11px] font-bold text-slate-400">Grade:</span>
               <select
                 v-model="selectedClassFilter"
                 class="bg-slate-50 hover:bg-white border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer shadow-2xs transition"
@@ -994,7 +955,7 @@ onMounted(async () => {
 
             <!-- Version Dropdown -->
             <div class="inline-flex items-center gap-1.5">
-              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Version:</span>
+              <span class="text-[11px] font-bold text-slate-400">Version:</span>
               <select
                 v-model="selectedVersionId"
                 class="bg-slate-50 hover:bg-white border border-slate-200 text-emerald-950 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 max-w-[280px] truncate cursor-pointer shadow-2xs transition"
@@ -1072,7 +1033,7 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th class="col-header p-2.5 text-left font-bold text-slate-700 w-48">
-                  <div class="text-[11px] font-black uppercase tracking-wider text-slate-600">Class & Section</div>
+                  <div class="text-[11px] font-semibold text-slate-600">Class & Section</div>
                 </th>
                 <th
                   v-for="p in periodsList"
@@ -1313,7 +1274,7 @@ onMounted(async () => {
         <div class="flex items-center gap-3 flex-wrap text-xs">
           <!-- Grade Dropdown -->
           <div class="inline-flex items-center gap-1.5">
-            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Grade:</span>
+            <span class="text-[11px] font-bold text-slate-400">Grade:</span>
             <select
               v-model="selectedClassId"
               class="bg-slate-50 hover:bg-white border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer shadow-2xs transition"
@@ -1324,7 +1285,7 @@ onMounted(async () => {
 
           <!-- Section Dropdown -->
           <div class="inline-flex items-center gap-1.5">
-            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Section:</span>
+            <span class="text-[11px] font-bold text-slate-400">Section:</span>
             <select
               v-model="selectedSectionId"
               class="bg-slate-50 hover:bg-white border border-slate-200 text-emerald-950 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer shadow-2xs transition"
@@ -1335,7 +1296,7 @@ onMounted(async () => {
 
           <!-- Version Dropdown -->
           <div class="inline-flex items-center gap-1.5">
-            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Version:</span>
+            <span class="text-[11px] font-bold text-slate-400">Version:</span>
             <select
               v-model="selectedVersionId"
               class="bg-slate-50 hover:bg-white border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 max-w-[280px] truncate cursor-pointer shadow-2xs transition"
@@ -1391,7 +1352,7 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th class="col-header p-2.5 text-left font-bold text-slate-700 w-44">
-                  <div class="text-[11px] font-black uppercase tracking-wider text-slate-600">Day / Period</div>
+                  <div class="text-[11px] font-semibold text-slate-600">Day / Period</div>
                 </th>
                 <th
                   v-for="p in periodsList"
@@ -1441,7 +1402,7 @@ onMounted(async () => {
                       </div>
                       <div class="text-left">
                         <div class="flex items-center gap-2">
-                          <span class="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Weekly Holiday (Friday)</span>
+                          <span class="font-extrabold text-xs text-slate-800">Weekly Holiday (Friday)</span>
                           <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200">Weekend</span>
                         </div>
                         <span class="text-[11px] text-slate-400 font-medium">Campus facilities closed for regular instruction. No academic periods scheduled.</span>
@@ -1620,7 +1581,7 @@ onMounted(async () => {
     <div v-if="activeTab === 'teacherMatrix'" class="flex flex-col gap-4">
       <div class="p-3.5 bg-white border border-slate-200/90 rounded-xl shadow-xs flex justify-between items-center flex-wrap gap-3">
         <div class="flex items-center gap-2">
-          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Day:</span>
+          <span class="text-xs font-bold text-slate-400">Day:</span>
           <button
             v-for="d in weekdays.filter(w => w.id !== 6)"
             :key="d.id"
@@ -1664,7 +1625,7 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th class="col-header p-2.5 text-left font-bold text-slate-700 w-48">
-                  <div class="text-[11px] font-black uppercase tracking-wider text-slate-600">Faculty Member</div>
+                  <div class="text-[11px] font-semibold text-slate-600">Faculty Member</div>
                 </th>
                 <th
                   v-for="p in periodsList"
@@ -1788,7 +1749,6 @@ onMounted(async () => {
           v-if="canManageTimetable"
           label="New Version Draft"
           icon="pi pi-plus"
-          class="brand-gradient-bg border-none"
           size="small"
           @click="versionModalVisible = true"
         />
@@ -1862,7 +1822,7 @@ onMounted(async () => {
       v-model:visible="slotModalVisible"
       modal
       :header="isSubstituteMode ? 'Assign Substitute Teacher (Coverage)' : (slotForm.id ? 'Edit Routine Slot' : 'Schedule Timetable Slot')"
-      :style="{ width: '520px' }"
+      :style="{ width: '520px', maxWidth: '95vw' }"
     >
       <form @submit.prevent="handleSaveSlot" class="flex flex-col gap-3.5 pt-1 text-xs">
         <!-- Substitute Context Header Banner -->
@@ -1881,14 +1841,14 @@ onMounted(async () => {
           <div class="flex items-start gap-2.5">
             <i class="pi pi-ban text-red-600 text-lg mt-0.5"></i>
             <div>
-              <strong class="font-black text-sm text-red-900">SIMULTANEOUS ASSIGNMENT CONFLICT</strong>
+              <strong class="font-bold text-sm text-red-900">Teacher already assigned</strong>
               <p class="mt-1 leading-relaxed text-xs">
                 <strong>{{ teacherConflictInForm.teacherName }}</strong> is already assigned to
                 <strong class="text-red-950 underline">{{ teacherConflictInForm.conflictClassName }}</strong> during
                 {{ teacherConflictInForm.periodName }} on {{ teacherConflictInForm.dayName }} in {{ teacherConflictInForm.room }}.
               </p>
-              <p class="text-xs text-red-700 font-extrabold mt-1.5">
-                ⛔ Policy Guard: One teacher cannot be assigned to two classes at the same time. Please select an available teacher.
+              <p class="text-xs text-red-700 font-semibold mt-1.5">
+                A teacher cannot be assigned to two classes at the same time. Please select an available teacher.
               </p>
             </div>
           </div>
@@ -1903,7 +1863,7 @@ onMounted(async () => {
         <!-- Teacher On-Leave Warning Banner -->
         <div v-if="teacherOnLeaveInForm && !teacherConflictInForm" class="p-3 bg-red-50 text-red-900 border border-red-300 rounded-xl text-xs">
           <i class="pi pi-bell mr-1 text-red-600"></i>
-          <strong>Leave Notice:</strong> Teacher <em>{{ teacherOnLeaveInForm }}</em> is recorded as <strong>ON LEAVE</strong>. This slot will appear <strong>RED MARKED</strong> in the routine grid for substitute monitoring.
+          <strong>Leave Notice:</strong> Teacher <em>{{ teacherOnLeaveInForm }}</em> is recorded as on leave. This slot will be highlighted in the routine grid so a substitute can be assigned.
         </div>
 
         <!-- Form Fields Grid -->
@@ -1964,7 +1924,7 @@ onMounted(async () => {
             </option>
           </select>
           <span class="text-[10px] text-slate-500 block mt-1">
-            Status indicators: ✅ Available | ⚠️ Busy in another class | 🚨 On Leave
+            Teachers marked "Busy" are teaching another class in this period; "On leave" teachers are recorded as absent.
           </span>
         </FormField>
 
@@ -1996,7 +1956,7 @@ onMounted(async () => {
             type="submit"
             :label="isSubstituteMode ? 'Confirm Substitute' : (slotForm.id ? 'Update Routine Slot' : 'Assign Slot')"
             icon="pi pi-check"
-            :class="teacherConflictInForm ? 'p-button-danger opacity-50 cursor-not-allowed' : 'brand-gradient-bg border-none'"
+            :severity="teacherConflictInForm ? 'danger' : undefined"
             :loading="slotSubmitting"
             :disabled="!!teacherConflictInForm || slotSubmitting"
           />
@@ -2009,7 +1969,7 @@ onMounted(async () => {
       v-model:visible="versionModalVisible"
       modal
       header="Create Timetable Routine Version"
-      :style="{ width: '480px' }"
+      :style="{ width: '480px', maxWidth: '95vw' }"
     >
       <form @submit.prevent="handleCreateVersion" class="flex flex-col gap-4 pt-2 text-xs">
         <FormField id="ver_name" label="Version Title" required>
@@ -2054,7 +2014,7 @@ onMounted(async () => {
 
         <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
           <Button type="button" label="Cancel" severity="secondary" text @click="versionModalVisible = false" />
-          <Button type="submit" label="Establish Version Draft" icon="pi pi-check" class="brand-gradient-bg border-none" :loading="versionSubmitting" />
+          <Button type="submit" label="Create Draft" icon="pi pi-check" :loading="versionSubmitting" />
         </div>
       </form>
     </Dialog>
@@ -2530,10 +2490,5 @@ onMounted(async () => {
     transform: scale(0.95);
     box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
   }
-}
-
-.brand-gradient-bg {
-  background: linear-gradient(135deg, #065f46 0%, #059669 100%) !important;
-  color: #ffffff !important;
 }
 </style>

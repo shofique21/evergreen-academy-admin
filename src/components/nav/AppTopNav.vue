@@ -22,8 +22,41 @@ const { requireConfirm } = useConfirmModal()
 
 const userRoleBadge = computed(() => {
   const role = authStore.userRoles[0] || 'staff'
-  return role.replace(/_/g, ' ').toUpperCase()
+  return role
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
 })
+
+// Current academic session (from the academic structure endpoint); hidden when unavailable
+const currentSessionName = ref<string | null>(null)
+
+async function fetchCurrentSession(): Promise<void> {
+  if (!authStore.isAuthenticated) return
+  try {
+    const res = await api.get('/api/v1/academics/structure')
+    currentSessionName.value = res.data.data?.current_session?.name ?? null
+  } catch {
+    currentSessionName.value = null
+  }
+}
+
+// Notification dropdown: close on outside click / Escape
+const notifWrapperRef = ref<HTMLElement | null>(null)
+
+function handleDocumentClick(event: MouseEvent): void {
+  if (!notifDropdownOpen.value) return
+  const target = event.target as Node | null
+  if (notifWrapperRef.value && target && !notifWrapperRef.value.contains(target)) {
+    notifDropdownOpen.value = false
+  }
+}
+
+function handleKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && notifDropdownOpen.value) {
+    notifDropdownOpen.value = false
+  }
+}
 
 const userInitials = computed(() => {
   const name = authStore.user?.name || 'User'
@@ -59,6 +92,7 @@ function toggleNotifDropdown(): void {
 
 function goToInbox(): void {
   notifDropdownOpen.value = false
+  // Single notifications destination: the communications inbox (/notifications redirects here)
   router.push('/communications?tab=inbox')
 }
 
@@ -73,22 +107,27 @@ async function markTopNotifRead(item: UserNotification): Promise<void> {
   }
 }
 
-let notifPollInterval: any = null
+let notifPollInterval: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   fetchTopNavNotifications()
+  fetchCurrentSession()
   notifPollInterval = setInterval(fetchTopNavNotifications, 45000)
+  document.addEventListener('click', handleDocumentClick)
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   if (notifPollInterval) clearInterval(notifPollInterval)
+  document.removeEventListener('click', handleDocumentClick)
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 function confirmLogout() {
   requireConfirm({
-    header: 'Sign Out Confirmation',
+    header: 'Sign out',
     message: 'Are you sure you want to end your current session?',
     icon: 'pi pi-sign-out',
-    acceptLabel: 'Sign Out',
+    acceptLabel: 'Sign out',
     rejectLabel: 'Cancel',
     acceptSeverity: 'danger',
     onAccept: async () => {
@@ -106,7 +145,7 @@ function confirmLogout() {
       <button
         type="button"
         class="mobile-toggle-btn"
-        aria-label="Open Navigation Menu"
+        aria-label="Open navigation menu"
         @click="emit('toggle-mobile-sidebar')"
       >
         <i class="pi pi-bars"></i>
@@ -114,9 +153,9 @@ function confirmLogout() {
 
       <!-- Institutional Context Badges -->
       <div class="badges-row">
-        <div class="academic-badge">
-          <i class="pi pi-calendar-plus" aria-hidden="true"></i>
-          <span>Academic Year 2026-2027 • NCTB</span>
+        <div v-if="currentSessionName" class="academic-badge">
+          <i class="pi pi-calendar" aria-hidden="true"></i>
+          <span>Session {{ currentSessionName }}</span>
         </div>
         <div v-if="campusName || authStore.user?.campus?.name" class="campus-badge">
           <i class="pi pi-building" aria-hidden="true"></i>
@@ -127,11 +166,13 @@ function confirmLogout() {
 
     <div class="topbar-right">
       <!-- Live Notification Bell Flyout -->
-      <div class="notif-wrapper">
+      <div ref="notifWrapperRef" class="notif-wrapper">
         <button
           type="button"
           class="notif-bell-btn"
-          aria-label="View In-App Notifications"
+          aria-label="Notifications"
+          aria-haspopup="true"
+          :aria-expanded="notifDropdownOpen"
           title="Notifications"
           @click="toggleNotifDropdown"
         >
@@ -144,7 +185,7 @@ function confirmLogout() {
         <!-- Dropdown Flyout -->
         <div v-if="notifDropdownOpen" class="notif-dropdown">
           <div class="notif-dropdown-header">
-            <span class="dropdown-title">In-App Notifications</span>
+            <span class="dropdown-title">Notifications</span>
             <span v-if="unreadNotifCount > 0" class="dropdown-unread-tag">
               {{ unreadNotifCount }} unread
             </span>
@@ -175,7 +216,7 @@ function confirmLogout() {
 
           <div class="notif-dropdown-footer">
             <button type="button" class="view-all-btn" @click="goToInbox">
-              <span>View All in Notification Hub</span>
+              <span>View all</span>
               <i class="pi pi-arrow-right"></i>
             </button>
           </div>
@@ -183,15 +224,16 @@ function confirmLogout() {
       </div>
 
       <!-- User profile info -->
-      <div class="user-pill">
+      <button type="button" class="user-pill" title="My Profile" aria-label="Open my profile" @click="router.push('/profile')">
         <div class="user-avatar" :title="authStore.user?.name">
-          {{ userInitials }}
+          <img v-if="authStore.user?.avatar" :src="authStore.user.avatar" :alt="`${authStore.user?.name} profile photo`" class="user-avatar-img" />
+          <template v-else>{{ userInitials }}</template>
         </div>
         <div class="user-meta">
           <span class="user-name">{{ authStore.user?.name || 'Administrator' }}</span>
           <Tag :value="userRoleBadge" severity="success" class="role-tag" />
         </div>
-      </div>
+      </button>
 
       <!-- Logout Button -->
       <Button
@@ -199,8 +241,8 @@ function confirmLogout() {
         severity="secondary"
         text
         rounded
-        aria-label="Sign Out"
-        title="Sign Out"
+        aria-label="Sign out"
+        title="Sign out"
         @click="confirmLogout"
       />
     </div>
@@ -290,6 +332,21 @@ function confirmLogout() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  /* rendered as a button (links to My Profile) */
+  background: transparent;
+  border: none;
+  padding: 0.25rem 0.5rem 0.25rem 0.25rem;
+  border-radius: 999px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: background 0.15s ease;
+}
+
+.user-pill:hover,
+.user-pill:focus-visible {
+  background: #f1f5f9;
+  outline: none;
 }
 
 .user-avatar {
@@ -304,6 +361,14 @@ function confirmLogout() {
   font-weight: 700;
   font-size: 0.875rem;
   border: 2px solid #a7f3d0;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.user-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .user-meta {
@@ -323,9 +388,10 @@ function confirmLogout() {
 }
 
 .role-tag {
-  font-size: 0.65rem !important;
-  padding: 0.1rem 0.4rem !important;
-  font-weight: 700;
+  font-size: 0.7rem !important;
+  padding: 0.1rem 0.45rem !important;
+  font-weight: 600;
+  text-transform: none;
 }
 
 /* Notification Bell & Flyout */

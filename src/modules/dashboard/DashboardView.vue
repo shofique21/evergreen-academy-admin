@@ -1,17 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatBDT, formatDate, formatDateTime } from '@/utils/formatters'
-import { PageHeader, LoadingState, ErrorState } from '@/components/common'
-import { DataTableWrapper } from '@/components/tables'
-import { StatusBadge } from '@/components/notifications'
+import { PageHeader, LoadingState, ErrorState, StatusBadge } from '@/components/common'
 import { AppButton } from '@/components/forms'
 
 const router = useRouter()
-const toast = useToast()
 const authStore = useAuthStore()
 
 interface DashboardOverviewData {
@@ -98,74 +94,6 @@ const loading = ref(true)
 const errorMessage = ref<string | null>(null)
 const dashboardData = ref<DashboardOverviewData | null>(null)
 
-// Fallback initial dataset if server response is still aggregating
-const fallbackData: DashboardOverviewData = {
-  campus_id: 1,
-  summary_date: '2026-10-16',
-  students: { active_count: 1420 },
-  teachers: { active_count: 78 },
-  staff: { active_count: 26 },
-  class_occupancy: {
-    total_capacity: 1600,
-    total_enrolled: 1420,
-    occupancy_percentage: 88.75,
-    classes: [
-      { class_id: 1, class_name: 'Class 6 (Bangla Medium)', total_capacity: 160, total_enrolled: 152, occupancy_percentage: 95.0 },
-      { class_id: 2, class_name: 'Class 7 (Bangla Medium)', total_capacity: 160, total_enrolled: 148, occupancy_percentage: 92.5 },
-      { class_id: 3, class_name: 'Class 8 (Bangla Medium)', total_capacity: 160, total_enrolled: 155, occupancy_percentage: 96.8 },
-      { class_id: 4, class_name: 'Class 9 (Science)', total_capacity: 160, total_enrolled: 142, occupancy_percentage: 88.7 },
-      { class_id: 5, class_name: 'Class 10 (Science)', total_capacity: 160, total_enrolled: 139, occupancy_percentage: 86.8 },
-      { class_id: 6, class_name: 'Class 9 (Commerce)', total_capacity: 120, total_enrolled: 98, occupancy_percentage: 81.6 },
-    ],
-  },
-  attendance_today: {
-    total_marked: 1420,
-    present: 1358,
-    absent: 34,
-    late: 22,
-    excused: 6,
-    attendance_percentage: 97.18,
-  },
-  financial: {
-    collection_today_gross: 248500,
-    collection_today_net: 248500,
-    collection_month_gross: 3840200,
-    collection_month_net: 3815200,
-    outstanding_dues: 945000,
-    overdue_dues: 312000,
-    overdue_invoices_count: 48,
-    unpaid_invoices_count: 142,
-  },
-  admissions: {
-    pending_count: 38,
-    approved_count: 112,
-    rejected_count: 14,
-    total_count: 164,
-  },
-  upcoming_examinations: [
-    { id: 1, name: 'Term 2 Final Examination 2026', start_date: '2026-11-05', end_date: '2026-11-20', status: 'SCHEDULED' },
-    { id: 2, name: 'Grade 10 Pre-Board Assessment', start_date: '2026-10-25', end_date: '2026-10-31', status: 'MARKS_ENTRY_OPEN' },
-    { id: 3, name: 'Class 8 JSC Diagnostic Evaluation', start_date: '2026-11-12', end_date: '2026-11-18', status: 'SCHEDULED' },
-  ],
-  recent_notices: [
-    { id: 1, title: 'Term 2 Examination Routine & Seat Plan Published', category: 'ACADEMIC', priority: 'HIGH', target_audience: 'ALL', published_at: '2026-10-16T14:00:00Z' },
-    { id: 2, title: 'Online Tuition Payment via bKash & SSLCommerz Integration Active', category: 'ADMINISTRATIVE', priority: 'NORMAL', target_audience: 'PARENTS', published_at: '2026-10-16T11:30:00Z' },
-    { id: 3, title: 'National Day Celebration & Morning Assembly Schedule', category: 'GENERAL', priority: 'NORMAL', target_audience: 'ALL', published_at: '2026-10-15T09:15:00Z' },
-  ],
-  operational_alerts: [
-    [
-      { id: 'alert-1', type: 'overdue_dues', severity: 'warn', title: 'Overdue Tuition Invoices', message: '48 invoices past due date totaling ৳312,000.00' },
-      { id: 'alert-2', type: 'admissions_pipeline', severity: 'info', title: 'Admissions Queue', message: '38 candidate applications awaiting committee entrance verification' },
-      { id: 'alert-3', type: 'system_health', severity: 'success', title: 'Infrastructure Nominal', message: 'Redis queue worker, Redis cache, and MySQL replication healthy' },
-    ] as any,
-  ][0],
-  recent_activity: [
-    { id: 101, event: 'payment.received', user_name: 'Accounts Cashier', user_email: 'cashier@evergreen.edu.bd', created_at: '2026-10-16T15:45:00Z', summary: 'Invoice #INV-2026-0042 cleared via bKash' },
-    { id: 102, event: 'attendance.marked', user_name: 'Prof. Hasan', user_email: 'hasan@evergreen.edu.bd', created_at: '2026-10-16T10:15:00Z', summary: 'Class 9 Section A daily attendance recorded' },
-    { id: 103, event: 'student.registered', user_name: 'Admissions Officer', user_email: 'admissions@evergreen.edu.bd', created_at: '2026-10-16T09:30:00Z', summary: 'Registered new student STU-2026-0089' },
-  ],
-}
-
 async function fetchDashboardData(forceRefresh = false) {
   try {
     loading.value = true
@@ -176,17 +104,26 @@ async function fetchDashboardData(forceRefresh = false) {
     if (data && data.data) {
       dashboardData.value = data.data
     } else {
-      dashboardData.value = fallbackData
+      dashboardData.value = null
+      errorMessage.value = "The dashboard returned no data."
     }
-  } catch (err: any) {
-    // Graceful fallback to rich presentation if offline/dev mock
-    dashboardData.value = fallbackData
+  } catch (err) {
+    dashboardData.value = null
+    errorMessage.value = (err as { message?: string })?.message || "Unable to load the dashboard right now."
   } finally {
     loading.value = false
   }
 }
 
-const currentData = computed<DashboardOverviewData>(() => dashboardData.value || fallbackData)
+// Only rendered once real data has loaded (template guards on dashboardData)
+const currentData = computed<DashboardOverviewData>(() => dashboardData.value as DashboardOverviewData)
+
+/** Width of an attendance segment as a percentage, safe when nothing is marked yet. */
+function attendanceShare(count: number): string {
+  const total = dashboardData.value?.attendance_today.total_marked ?? 0
+  if (!total) return "0%"
+  return `${(count / total) * 100}%`
+}
 
 const isTeacher = computed(() => {
   if (authStore.isSuperAdmin) return false
@@ -234,42 +171,23 @@ const canViewFinancials = computed(() => {
 })
 
 const dashboardTitle = computed(() => {
-  return isTeacher.value ? 'Faculty Dashboard' : 'Administrative Command Center'
+  return 'Dashboard'
 })
 
 const welcomeSubtitle = computed(() => {
-  const userName = authStore.user?.name ? `${authStore.user.name} — ` : ''
-  if (isTeacher.value) {
-    return `Academic routine, classes, and instructional oversight for ${userName}Evergreen Academy (${currentData.value.summary_date}).`
-  }
-  return `Real-time executive oversight for ${userName}Evergreen Academy (${currentData.value.summary_date}).`
+  const name = authStore.user?.name ? `Welcome back, ${authStore.user.name}.` : 'Welcome back.'
+  const date = dashboardData.value?.summary_date
+  return date ? `${name} Overview for ${formatDate(date)}.` : name
 })
 
 const filteredOperationalAlerts = computed(() => {
-  return currentData.value.operational_alerts.filter((alert) => {
+  return (dashboardData.value?.operational_alerts ?? []).filter((alert) => {
     if (isTeacher.value && (alert.type === 'overdue_dues' || alert.type === 'admissions_pipeline' || alert.type.includes('fee') || alert.type.includes('invoice'))) {
       return false
     }
     return true
   })
 })
-
-// Recent Invoices Sample for quick action table
-const overdueInvoicesList = ref([
-  { id: 'INV-2026-0412', student: 'Sadman Sakib', class: 'Class 10 (Science)', amount: 9500, daysOverdue: 16, contact: '+8801711223344' },
-  { id: 'INV-2026-0415', student: 'Nusrat Jahan', class: 'Class 8 (Bangla)', amount: 6200, daysOverdue: 22, contact: '+8801819887766' },
-  { id: 'INV-2026-0422', student: 'Kazi Farhan', class: 'Class 9 (Science)', amount: 8400, daysOverdue: 12, contact: '+8801912334455' },
-  { id: 'INV-2026-0430', student: 'Maliha Tabassum', class: 'Class 7 (Bangla)', amount: 5000, daysOverdue: 35, contact: '+8801615556677' },
-])
-
-function sendPaymentReminder(invoiceId: string, contact: string) {
-  toast.add({
-    severity: 'success',
-    summary: 'SMS Reminder Dispatched',
-    detail: `Payment prompt sent to ${contact} for ${invoiceId}.`,
-    life: 3500,
-  })
-}
 
 onMounted(() => {
   if (isStudent.value) {
@@ -290,16 +208,10 @@ onMounted(() => {
     <PageHeader
       :title="dashboardTitle"
       :subtitle="welcomeSubtitle"
-      icon="pi pi-th-large"
     >
       <template #actions>
-        <span class="live-status-pill">
-          <span class="status-pulse-dot"></span>
-          <span>SYSTEM LIVE</span>
-        </span>
-
         <AppButton
-          label="Refresh Metrics"
+          label="Refresh"
           icon="pi pi-refresh"
           severity="secondary"
           :loading="loading"
@@ -342,18 +254,18 @@ onMounted(() => {
     </PageHeader>
 
     <!-- Loading State Handler -->
-    <LoadingState v-if="loading && !dashboardData" message="Synchronizing executive metrics..." />
+    <LoadingState v-if="loading && !dashboardData" message="Loading dashboard..." />
 
     <!-- Error State Handler -->
     <ErrorState
       v-else-if="errorMessage"
-      title="Failed to Load Dashboard"
+      title="Unable to load dashboard"
       :message="errorMessage"
       @retry="fetchDashboardData(true)"
     />
 
     <!-- Main Content Container -->
-    <div v-else class="dashboard-grid-layout">
+    <div v-else-if="dashboardData" class="dashboard-grid-layout">
       <!-- 1. Executive Population & Financial KPI Metric Cards -->
       <div class="kpi-banner-grid">
         <!-- Active Students Card -->
@@ -386,10 +298,7 @@ onMounted(() => {
           <div class="stat-body">
             <h2 class="stat-value">{{ currentData.teachers.active_count }}</h2>
             <div class="stat-trend">
-              <span class="trend-pill pill-info">
-                <i class="pi pi-check"></i> 100% Deployed
-              </span>
-              <span class="stat-subtext">Student-Teacher ratio: ~1:18</span>
+              <span class="stat-subtext">Active teaching staff</span>
             </div>
           </div>
         </div>
@@ -405,10 +314,7 @@ onMounted(() => {
           <div class="stat-body">
             <h2 class="stat-value">{{ currentData.staff.active_count }}</h2>
             <div class="stat-trend">
-              <span class="trend-pill pill-purple">
-                <i class="pi pi-shield"></i> Administration
-              </span>
-              <span class="stat-subtext">Accounts, ICT, & Security</span>
+              <span class="stat-subtext">Active non-teaching staff</span>
             </div>
           </div>
         </div>
@@ -425,9 +331,8 @@ onMounted(() => {
             <h2 class="stat-value">{{ formatBDT(currentData.financial.collection_today_net) }}</h2>
             <div class="stat-trend">
               <span class="trend-pill pill-amber">
-                MTD: {{ formatBDT(currentData.financial.collection_month_net) }}
+                This month: {{ formatBDT(currentData.financial.collection_month_net) }}
               </span>
-              <span class="stat-subtext">bKash, SSL & POS</span>
             </div>
           </div>
         </div>
@@ -450,22 +355,22 @@ onMounted(() => {
           <div class="attendance-visual-bar">
             <div
               class="segment seg-present"
-              :style="{ width: `${(currentData.attendance_today.present / currentData.attendance_today.total_marked) * 100}%` }"
+              :style="{ width: attendanceShare(currentData.attendance_today.present) }"
               title="Present"
             ></div>
             <div
               class="segment seg-late"
-              :style="{ width: `${(currentData.attendance_today.late / currentData.attendance_today.total_marked) * 100}%` }"
+              :style="{ width: attendanceShare(currentData.attendance_today.late) }"
               title="Late"
             ></div>
             <div
               class="segment seg-absent"
-              :style="{ width: `${(currentData.attendance_today.absent / currentData.attendance_today.total_marked) * 100}%` }"
+              :style="{ width: attendanceShare(currentData.attendance_today.absent) }"
               title="Absent"
             ></div>
             <div
               class="segment seg-excused"
-              :style="{ width: `${(currentData.attendance_today.excused / currentData.attendance_today.total_marked) * 100}%` }"
+              :style="{ width: attendanceShare(currentData.attendance_today.excused) }"
               title="Leave / Excused"
             ></div>
           </div>
@@ -495,7 +400,7 @@ onMounted(() => {
 
           <div class="card-footer-action">
             <AppButton
-              label="Open Attendance Matrix"
+              label="Open attendance"
               icon="pi pi-arrow-right"
               severity="secondary"
               outlined
@@ -549,31 +454,31 @@ onMounted(() => {
               <span class="pipe-val">{{ currentData.admissions.total_count }}</span>
             </div>
             <div class="pipe-stat">
-              <span class="pipe-label">Approved & Enrolled</span>
+              <span class="pipe-label">Approved</span>
               <span class="pipe-val text-emerald-600">{{ currentData.admissions.approved_count }}</span>
             </div>
             <div class="pipe-stat">
-              <span class="pipe-label">Awaiting Entrance Exam</span>
+              <span class="pipe-label">Pending</span>
               <span class="pipe-val text-amber-600">{{ currentData.admissions.pending_count }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 3. Financial Receivables & Overdue Invoices Alert Section (Hidden on Teacher's, Student's, & Parent's Dashboard) -->
+      <!-- 3. Outstanding dues summary (finance roles only) -->
       <div v-if="!isTeacher && !isStudent && !isParent && canViewFinancials" class="content-card financial-dues-card">
         <div class="card-head">
           <div class="head-title-wrap">
             <i class="pi pi-exclamation-triangle text-rose-600"></i>
             <div>
-              <h3>Outstanding Balances & Overdue Invoices</h3>
+              <h3>Outstanding Dues</h3>
               <p class="text-xs text-slate-500">
-                Total outstanding receivables: <strong>{{ formatBDT(currentData.financial.outstanding_dues) }}</strong> | Overdue dues: <strong>{{ formatBDT(currentData.financial.overdue_dues) }}</strong>
+                Outstanding: <strong>{{ formatBDT(currentData.financial.outstanding_dues) }}</strong> · Overdue: <strong>{{ formatBDT(currentData.financial.overdue_dues) }}</strong>
               </p>
             </div>
           </div>
           <AppButton
-            label="View Fee Registry"
+            label="View fees"
             icon="pi pi-list"
             severity="secondary"
             size="small"
@@ -582,54 +487,6 @@ onMounted(() => {
           />
         </div>
 
-        <DataTableWrapper
-          :value="overdueInvoicesList"
-          :totalRecords="overdueInvoicesList.length"
-          :showSearch="false"
-        >
-          <Column field="id" header="Invoice #" sortable>
-            <template #body="{ data }">
-              <span class="font-mono text-xs font-bold text-slate-800">{{ data.id }}</span>
-            </template>
-          </Column>
-
-          <Column field="student" header="Student Name" sortable>
-            <template #body="{ data }">
-              <span class="font-medium text-slate-900">{{ data.student }}</span>
-            </template>
-          </Column>
-
-          <Column field="class" header="Class / Section">
-            <template #body="{ data }">
-              <span class="text-xs text-slate-600">{{ data.class }}</span>
-            </template>
-          </Column>
-
-          <Column field="amount" header="Payable (BDT)" sortable>
-            <template #body="{ data }">
-              <span class="font-bold text-rose-600">{{ formatBDT(data.amount) }}</span>
-            </template>
-          </Column>
-
-          <Column field="daysOverdue" header="Aging" sortable>
-            <template #body="{ data }">
-              <span class="aging-pill">{{ data.daysOverdue }} days overdue</span>
-            </template>
-          </Column>
-
-          <Column header="Guardian Action">
-            <template #body="{ data }">
-              <AppButton
-                label="Send SMS Reminder"
-                icon="pi pi-send"
-                severity="warn"
-                size="small"
-                outlined
-                @click="sendPaymentReminder(data.id, data.contact)"
-              />
-            </template>
-          </Column>
-        </DataTableWrapper>
       </div>
 
       <!-- 4. Three Column Lower Row: Upcoming Exams, Notices, & Operational Alerts -->
@@ -676,7 +533,7 @@ onMounted(() => {
           <div class="card-head">
             <div class="head-title-wrap">
               <i class="pi pi-megaphone text-blue-600"></i>
-              <h3>Institutional Notices</h3>
+              <h3>Recent Notices</h3>
             </div>
             <router-link to="/communications" class="text-xs font-semibold text-blue-600 hover:underline">
               Notice Board
@@ -712,11 +569,8 @@ onMounted(() => {
           <div class="card-head">
             <div class="head-title-wrap">
               <i class="pi pi-bell text-amber-600"></i>
-              <h3>Operational Alerts</h3>
+              <h3>Alerts</h3>
             </div>
-            <router-link to="/notifications" class="text-xs font-semibold text-amber-600 hover:underline">
-              Alert Logs
-            </router-link>
           </div>
 
           <div class="alerts-items-list">
@@ -742,6 +596,10 @@ onMounted(() => {
                 <p class="alert-msg">{{ alert.message }}</p>
               </div>
             </div>
+
+            <div v-if="filteredOperationalAlerts.length === 0" class="p-4 text-center text-slate-400 text-xs">
+              No alerts right now
+            </div>
           </div>
         </div>
       </div>
@@ -754,34 +612,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-}
-
-.live-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  background: #ecfdf5;
-  color: #059669;
-  border: 1px solid #a7f3d0;
-  padding: 0.35rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.status-pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: #10b981;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35);
-  animation: pulse-dot 1.8s infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.2); opacity: 0.75; }
 }
 
 .dashboard-grid-layout {
@@ -1065,16 +895,6 @@ onMounted(() => {
   font-size: 1.15rem;
   font-weight: 800;
   color: #0f172a;
-}
-
-/* Overdue Invoices Table & Aging Pill */
-.aging-pill {
-  font-size: 0.725rem;
-  font-weight: 700;
-  padding: 0.2rem 0.5rem;
-  border-radius: 9999px;
-  background: #fee2e2;
-  color: #b91c1c;
 }
 
 /* Three Column Row */
